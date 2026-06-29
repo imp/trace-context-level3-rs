@@ -1,5 +1,6 @@
 [package]
 name = "trace-context-level3"
+description = "W3C Trace Context Level 3 — core types, parsing, and serialization of traceparent and tracestate"
 
 version.workspace = true
 edition.workspace = true

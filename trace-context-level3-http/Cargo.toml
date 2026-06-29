@@ -1,5 +1,6 @@
 [package]
 name = "trace-context-level3-http"
+description = "W3C Trace Context Level 3 — HTTP header extraction and injection via the http crate"
 
 version.workspace = true
 edition.workspace = true
