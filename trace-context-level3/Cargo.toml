@@ -1,0 +1,16 @@
+[package]
+name = "trace-context-level3"
+
+version.workspace = true
+edition.workspace = true
+repository.workspace = true
+license.workspace = true
+keywords.workspace = true
+readme.workspace = true
+
+
+[dependencies]
+
+
+[lints]
+workspace = true
