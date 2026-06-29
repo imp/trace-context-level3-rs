@@ -1,0 +1,39 @@
+[tasks.fmt]
+description = "Format all code"
+run = "cargo fmt --all"
+
+[tasks.fmt-check]
+description = "Check formatting without writing changes"
+run = "cargo fmt --all -- --check"
+
+[tasks.check]
+description = "Type-check workspace without building"
+run = "cargo check --workspace"
+
+[tasks.clippy]
+description = "Lint with clippy across all targets"
+run = "cargo clippy --workspace --all-targets"
+
+[tasks.test]
+description = "Run tests with default features"
+run = "cargo test --workspace"
+
+[tasks.test-rand]
+description = "Run tests with rand feature enabled"
+run = "cargo test --workspace --features trace-context-level3/rand"
+
+[tasks.test-all]
+description = "Run tests with and without rand feature"
+depends = ["test", "test-rand"]
+
+[tasks.clean]
+description = "Remove build artifacts"
+run = "cargo clean"
+
+[tasks.doc]
+description = "Build and open documentation"
+run = "cargo doc --workspace --no-deps --open"
+
+[tasks.ci]
+description = "Full CI check: fmt + clippy + all tests"
+depends = ["fmt-check", "clippy", "test-all"]

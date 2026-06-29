@@ -348,7 +348,10 @@ impl TraceParent {
             version: Self::VERSION_0,
             trace_id: self.trace_id,
             parent_id: new_parent,
-            trace_flags: self.trace_flags.with_sampled(sampled).with_reserved_cleared(),
+            trace_flags: self
+                .trace_flags
+                .with_sampled(sampled)
+                .with_reserved_cleared(),
         }
     }
 
@@ -620,7 +623,8 @@ mod tests {
     #[test]
     fn child_preserves_trace_id_and_flags() {
         let tp: TraceParent = VALID.parse().unwrap();
-        let new_parent = ParentId::from_bytes([0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08]).unwrap();
+        let new_parent =
+            ParentId::from_bytes([0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08]).unwrap();
         let child = tp.child(new_parent);
         assert_eq!(child.trace_id, tp.trace_id);
         assert_eq!(child.parent_id, new_parent);

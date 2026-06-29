@@ -149,9 +149,7 @@ fn is_valid_key(key: &str) -> bool {
 }
 
 fn is_keychar(b: u8) -> bool {
-    b.is_ascii_lowercase()
-        || b.is_ascii_digit()
-        || matches!(b, b'_' | b'-' | b'*' | b'/' | b'@')
+    b.is_ascii_lowercase() || b.is_ascii_digit() || matches!(b, b'_' | b'-' | b'*' | b'/' | b'@')
 }
 
 /// `value = 0*255(chr) nblk-chr`  (length 1–256)
@@ -244,7 +242,10 @@ mod tests {
 
     #[test]
     fn rejects_too_many_entries() {
-        let s = (0..33).map(|i| format!("k{i}=v")).collect::<Vec<_>>().join(",");
+        let s = (0..33)
+            .map(|i| format!("k{i}=v"))
+            .collect::<Vec<_>>()
+            .join(",");
         assert!(matches!(
             s.parse::<TraceState>(),
             Err(TraceStateError::TooManyEntries)
