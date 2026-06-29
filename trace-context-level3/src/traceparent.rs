@@ -449,8 +449,10 @@ impl str::FromStr for TraceParent {
             return Err(TraceParentError::TrailingData(bytes.len()));
         }
 
+        // Spec §3.3: when forwarding a higher-version traceparent, re-emit as
+        // version 00. Normalising here means every parsed value serialises as v00.
         Ok(Self {
-            version,
+            version: Self::VERSION_0,
             trace_id,
             parent_id,
             trace_flags,
@@ -568,8 +570,24 @@ mod tests {
         // version 01, longer than 55 chars — spec says ignore trailing data
         let s = "01-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01-unknownfield";
         let tp: TraceParent = s.parse().unwrap();
-        assert_eq!(tp.version, 0x01);
+        // Spec §3.3: normalise to v00 on parse so it forwards as version 00
+        assert_eq!(tp.version, TraceParent::VERSION_0);
         assert!(tp.is_sampled());
+    }
+
+    #[test]
+    fn future_version_downgrades_to_v00_on_display() {
+        let s = "01-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01-unknownfield";
+        let tp: TraceParent = s.parse().unwrap();
+        assert!(tp.to_string().starts_with("00-"));
+    }
+
+    #[test]
+    fn future_version_without_trailing_data_accepted() {
+        // exactly 55 chars, version 02 — no trailing data is also valid
+        let s = "02-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01";
+        let tp: TraceParent = s.parse().unwrap();
+        assert_eq!(tp.version, TraceParent::VERSION_0);
     }
 
     #[test]
