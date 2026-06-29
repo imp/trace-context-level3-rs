@@ -73,7 +73,7 @@ fn collect_tracestate(headers: &HeaderMap) -> TraceState {
         .filter_map(|v| v.to_str().ok())
         .collect::<Vec<_>>()
         .join(",");
-    combined.parse().unwrap_or_default()
+    TraceState::parse_lenient(&combined)
 }
 
 #[cfg(test)]
@@ -116,6 +116,17 @@ mod tests {
     #[test]
     fn extract_parses_tracestate() {
         let headers = header_map(&[("traceparent", VALID_TP), ("tracestate", "vendor=value")]);
+        let ctx = TraceContext::extract(&headers).unwrap().unwrap();
+        assert_eq!(ctx.tracestate.get("vendor"), Some("value"));
+    }
+
+    #[test]
+    fn extract_preserves_valid_entries_alongside_invalid() {
+        // A bad entry should be silently dropped; the good one must survive.
+        let headers = header_map(&[
+            ("traceparent", VALID_TP),
+            ("tracestate", "vendor=value,!!!bad!!!"),
+        ]);
         let ctx = TraceContext::extract(&headers).unwrap().unwrap();
         assert_eq!(ctx.tracestate.get("vendor"), Some("value"));
     }

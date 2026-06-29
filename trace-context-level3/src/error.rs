@@ -46,4 +46,8 @@ pub enum TraceStateError {
     /// A value contained forbidden characters or violated length constraints.
     #[error("invalid tracestate value: {0:?}")]
     InvalidValue(String),
+
+    /// The same key appeared more than once in the `tracestate` header.
+    #[error("duplicate tracestate key: {0:?}")]
+    DuplicateKey(String),
 }

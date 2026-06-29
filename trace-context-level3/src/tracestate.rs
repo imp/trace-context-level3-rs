@@ -105,6 +105,39 @@ impl TraceState {
         }
     }
 
+    /// Parses a `tracestate` header value leniently, silently discarding any
+    /// invalid or duplicate entries rather than failing the whole header.
+    ///
+    /// Use this when consuming headers received from an upstream system. Valid
+    /// entries are preserved in order; the first occurrence of a duplicate key
+    /// is kept and later occurrences are dropped. At most 32 entries are kept.
+    #[must_use]
+    pub fn parse_lenient(s: &str) -> Self {
+        let mut entries: Vec<(String, String)> = Vec::new();
+        for member in s.split(',') {
+            let member = member.trim_matches(|c| c == ' ' || c == '\t');
+            if member.is_empty() {
+                continue;
+            }
+            let Some(eq) = member.find('=') else {
+                continue;
+            };
+            let key = &member[..eq];
+            let value = &member[eq + 1..];
+            if !is_valid_key(key) || !is_valid_value(value) {
+                continue;
+            }
+            if entries.iter().any(|(k, _)| k == key) {
+                continue; // first occurrence wins
+            }
+            if entries.len() >= MAX_ENTRIES {
+                break;
+            }
+            entries.push((key.to_owned(), value.to_owned()));
+        }
+        Self(entries)
+    }
+
     fn encoded_len(&self) -> usize {
         if self.0.is_empty() {
             return 0;
@@ -151,6 +184,9 @@ impl str::FromStr for TraceState {
             if !is_valid_value(value) {
                 return Err(TraceStateError::InvalidValue(value.to_owned()));
             }
+            if entries.iter().any(|(k, _)| k == key) {
+                return Err(TraceStateError::DuplicateKey(key.to_owned()));
+            }
             if entries.len() >= MAX_ENTRIES {
                 return Err(TraceStateError::TooManyEntries);
             }
@@ -160,23 +196,49 @@ impl str::FromStr for TraceState {
     }
 }
 
-/// Level 2/3 key grammar:
-/// `key = ( lcalpha / DIGIT ) 0*255( keychar )`
-/// `keychar = lcalpha / DIGIT / "_" / "-" / "*" / "/" / "@"`
+/// Spec key grammar has two forms:
+///
+/// simple-key:       `(lcalpha / DIGIT) 0*255(keychar)` — max 256 chars, no `@`
+/// multi-tenant-key: `tenant-id "@" system-id`
+///   tenant-id:  `(lcalpha / DIGIT) 0*240(keychar)` — max 241 chars
+///   system-id:  `lcalpha 0*13(lcalpha / DIGIT / "-")` — max 14 chars
+///
+/// `keychar = lcalpha / DIGIT / "_" / "-" / "*" / "/"` — note: no `@`
 fn is_valid_key(key: &str) -> bool {
-    let bytes = key.as_bytes();
-    match bytes {
-        [] => false,
-        [first, rest @ ..] if bytes.len() <= 256 => {
-            (first.is_ascii_lowercase() || first.is_ascii_digit())
-                && rest.iter().all(|&b| is_keychar(b))
-        }
-        _ => false,
+    match key.find('@') {
+        None => is_valid_simple_key(key),
+        Some(at) if key[at + 1..].contains('@') => false,
+        Some(at) => is_valid_tenant_id(&key[..at]) && is_valid_system_id(&key[at + 1..]),
     }
 }
 
+fn is_valid_simple_key(key: &str) -> bool {
+    let b = key.as_bytes();
+    matches!(b, [first, rest @ ..] if b.len() <= 256
+        && (first.is_ascii_lowercase() || first.is_ascii_digit())
+        && rest.iter().all(|&c| is_keychar(c)))
+}
+
+fn is_valid_tenant_id(s: &str) -> bool {
+    let b = s.as_bytes();
+    matches!(b, [first, rest @ ..] if b.len() <= 241
+        && (first.is_ascii_lowercase() || first.is_ascii_digit())
+        && rest.iter().all(|&c| is_keychar(c)))
+}
+
+fn is_valid_system_id(s: &str) -> bool {
+    let b = s.as_bytes();
+    matches!(b, [first, rest @ ..] if b.len() <= 14
+        && first.is_ascii_lowercase()
+        && rest.iter().all(|&c| is_system_id_char(c)))
+}
+
 fn is_keychar(b: u8) -> bool {
-    b.is_ascii_lowercase() || b.is_ascii_digit() || matches!(b, b'_' | b'-' | b'*' | b'/' | b'@')
+    b.is_ascii_lowercase() || b.is_ascii_digit() || matches!(b, b'_' | b'-' | b'*' | b'/')
+}
+
+fn is_system_id_char(b: u8) -> bool {
+    b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-'
 }
 
 /// `value = 0*255(chr) nblk-chr`  (length 1–256)
@@ -236,9 +298,60 @@ mod tests {
     }
 
     #[test]
-    fn parse_key_with_at_sign() {
+    fn parse_multi_tenant_key() {
         let state: TraceState = "tenant@system=val".parse().unwrap();
         assert_eq!(state.get("tenant@system"), Some("val"));
+    }
+
+    #[test]
+    fn parse_multi_tenant_key_digit_tenant() {
+        let state: TraceState = "1tenant@sys=v".parse().unwrap();
+        assert_eq!(state.get("1tenant@sys"), Some("v"));
+    }
+
+    #[test]
+    fn rejects_multi_tenant_key_double_at() {
+        assert!("a@@b=v".parse::<TraceState>().is_err());
+        assert!("a@b@c=v".parse::<TraceState>().is_err());
+    }
+
+    #[test]
+    fn rejects_multi_tenant_key_empty_tenant() {
+        assert!("@system=v".parse::<TraceState>().is_err());
+    }
+
+    #[test]
+    fn rejects_multi_tenant_key_empty_system() {
+        assert!("tenant@=v".parse::<TraceState>().is_err());
+    }
+
+    #[test]
+    fn rejects_multi_tenant_key_system_starts_with_digit() {
+        assert!("tenant@1sys=v".parse::<TraceState>().is_err());
+    }
+
+    #[test]
+    fn rejects_multi_tenant_key_system_with_underscore() {
+        // system-id allows only lcalpha / DIGIT / "-", not "_"
+        assert!("tenant@sys_id=v".parse::<TraceState>().is_err());
+    }
+
+    #[test]
+    fn rejects_multi_tenant_key_tenant_id_too_long() {
+        let tenant = "a".repeat(242);
+        assert!(format!("{tenant}@sys=v").parse::<TraceState>().is_err());
+    }
+
+    #[test]
+    fn rejects_multi_tenant_key_system_id_too_long() {
+        let system = "a".repeat(15);
+        assert!(format!("tenant@{system}=v").parse::<TraceState>().is_err());
+    }
+
+    #[test]
+    fn rejects_simple_key_with_at() {
+        // bare @ without a valid multi-tenant structure
+        assert!("@=v".parse::<TraceState>().is_err());
     }
 
     #[test]
@@ -373,6 +486,54 @@ mod tests {
         let state = TraceState::default();
         assert!(state.is_empty());
         assert_eq!(state.to_string(), "");
+    }
+
+    // --- duplicate key detection ---
+
+    #[test]
+    fn rejects_duplicate_keys_in_strict_parse() {
+        assert!(matches!(
+            "foo=a,foo=b".parse::<TraceState>(),
+            Err(TraceStateError::DuplicateKey(_))
+        ));
+    }
+
+    #[test]
+    fn insert_replace_does_not_produce_duplicate() {
+        let mut state: TraceState = "foo=a".parse().unwrap();
+        state.insert("foo", "b").unwrap();
+        assert_eq!(state.len(), 1);
+        assert_eq!(state.get("foo"), Some("b"));
+    }
+
+    // --- parse_lenient ---
+
+    #[test]
+    fn parse_lenient_discards_invalid_key() {
+        let state = TraceState::parse_lenient("valid=ok,!!!bad!!!=v,other=2");
+        assert_eq!(state.get("valid"), Some("ok"));
+        assert_eq!(state.get("other"), Some("2"));
+        assert_eq!(state.len(), 2);
+    }
+
+    #[test]
+    fn parse_lenient_discards_entry_without_eq() {
+        let state = TraceState::parse_lenient("a=1,noequalssign,b=2");
+        assert_eq!(state.get("a"), Some("1"));
+        assert_eq!(state.get("b"), Some("2"));
+        assert_eq!(state.len(), 2);
+    }
+
+    #[test]
+    fn parse_lenient_keeps_first_on_duplicate() {
+        let state = TraceState::parse_lenient("foo=first,bar=x,foo=second");
+        assert_eq!(state.get("foo"), Some("first"));
+        assert_eq!(state.len(), 2);
+    }
+
+    #[test]
+    fn parse_lenient_empty_string() {
+        assert!(TraceState::parse_lenient("").is_empty());
     }
 
     // --- truncate ---
