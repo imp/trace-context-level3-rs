@@ -22,9 +22,13 @@ run = "cargo test --workspace"
 description = "Run tests with rand feature enabled"
 run = "cargo test --workspace --features trace-context-level3/rand"
 
+[tasks.test-task-local]
+description = "Run tests with task-local feature enabled"
+run = "cargo test --workspace --features trace-context-level3-tower/task-local"
+
 [tasks.test-all]
-description = "Run tests with and without rand feature"
-depends = ["test", "test-rand"]
+description = "Run tests across all feature combinations"
+depends = ["test", "test-rand", "test-task-local"]
 
 [tasks.clean]
 description = "Remove build artifacts"

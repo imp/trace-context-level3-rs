@@ -10,10 +10,16 @@ keywords.workspace = true
 readme.workspace = true
 
 
+[features]
+task-local = ["dep:pin-project", "dep:tokio"]
+
+
 [dependencies]
 trace-context-level3 = { workspace = true, features = ["rand"] }
 trace-context-level3-http.workspace = true
 http.workspace = true
+pin-project = { workspace = true, optional = true }
+tokio = { workspace = true, features = ["rt"], optional = true }
 tower = { workspace = true, default-features = false }
 
 

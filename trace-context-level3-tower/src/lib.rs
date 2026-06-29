@@ -3,7 +3,16 @@
 //! [`TraceContextLayer`] extracts the incoming `traceparent`/`tracestate` headers,
 //! advances the span (or starts a new root), and stores the resulting
 //! [`TraceContext`] in [`http::Request`] extensions for downstream handlers.
+//!
+//! With the `task-local` feature enabled, calling
+//! [`TraceContextLayer::enable_task_local`] additionally stores the context in the
+//! [`TRACE_CONTEXT`] task-local for the duration of each inner future — no second
+//! header parse.
 
+#[cfg(feature = "task-local")]
+use std::future::Future;
+#[cfg(feature = "task-local")]
+use std::pin::Pin;
 use std::task::Context;
 use std::task::Poll;
 
@@ -18,6 +27,36 @@ use trace_context_level3::TraceId;
 use trace_context_level3::TraceParent;
 use trace_context_level3::TraceState;
 use trace_context_level3_http::TraceContext;
+
+#[cfg(feature = "task-local")]
+tokio::task_local! {
+    /// Task-local [`TraceContext`] set by [`TraceContextLayer`] when enabled via
+    /// [`TraceContextLayer::enable_task_local`].
+    pub static TRACE_CONTEXT: TraceContext;
+}
+
+/// Future returned by [`TraceContextService`] when the `task-local` feature is enabled.
+///
+/// Wraps the inner future either plainly or inside a [`TRACE_CONTEXT`] scope,
+/// depending on whether task-local storage was enabled on the layer.
+#[cfg(feature = "task-local")]
+#[pin_project::pin_project(project = TraceContextFutureProj)]
+pub enum TraceContextFuture<F> {
+    Plain(#[pin] F),
+    Scoped(#[pin] tokio::task::futures::TaskLocalFuture<TraceContext, F>),
+}
+
+#[cfg(feature = "task-local")]
+impl<F: Future> Future for TraceContextFuture<F> {
+    type Output = F::Output;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        match self.project() {
+            TraceContextFutureProj::Plain(fut) => fut.poll(cx),
+            TraceContextFutureProj::Scoped(fut) => fut.poll(cx),
+        }
+    }
+}
 
 /// An [`IdGenerator`] backed by `rand`, producing cryptographically random IDs.
 ///
@@ -54,6 +93,8 @@ impl IdGenerator for RandIdGenerator {
 #[derive(Clone, Debug, Default)]
 pub struct TraceContextLayer<G = RandIdGenerator> {
     generator: G,
+    #[cfg(feature = "task-local")]
+    task_local: bool,
 }
 
 impl TraceContextLayer<RandIdGenerator> {
@@ -67,7 +108,21 @@ impl TraceContextLayer<RandIdGenerator> {
 impl<G> TraceContextLayer<G> {
     /// Creates a [`TraceContextLayer`] with a custom [`IdGenerator`].
     pub fn with_generator(generator: G) -> Self {
-        Self { generator }
+        Self {
+            generator,
+            #[cfg(feature = "task-local")]
+            task_local: false,
+        }
+    }
+}
+
+#[cfg(feature = "task-local")]
+impl<G> TraceContextLayer<G> {
+    /// Also stores the [`TraceContext`] in the [`TRACE_CONTEXT`] task-local for
+    /// the duration of each inner future.
+    pub fn enable_task_local(mut self) -> Self {
+        self.task_local = true;
+        self
     }
 }
 
@@ -78,6 +133,8 @@ impl<S, G: IdGenerator + Clone> Layer<S> for TraceContextLayer<G> {
         TraceContextService {
             inner,
             generator: self.generator.clone(),
+            #[cfg(feature = "task-local")]
+            task_local: self.task_local,
         }
     }
 }
@@ -87,8 +144,11 @@ impl<S, G: IdGenerator + Clone> Layer<S> for TraceContextLayer<G> {
 pub struct TraceContextService<S, G = RandIdGenerator> {
     inner: S,
     generator: G,
+    #[cfg(feature = "task-local")]
+    task_local: bool,
 }
 
+#[cfg(not(feature = "task-local"))]
 impl<S, G, B> Service<Request<B>> for TraceContextService<S, G>
 where
     S: Service<Request<B>>,
@@ -106,6 +166,32 @@ where
         let ctx = build_trace_context(&self.generator, req.headers());
         req.extensions_mut().insert(ctx);
         self.inner.call(req)
+    }
+}
+
+#[cfg(feature = "task-local")]
+impl<S, G, B> Service<Request<B>> for TraceContextService<S, G>
+where
+    S: Service<Request<B>>,
+    G: IdGenerator,
+{
+    type Response = S::Response;
+    type Error = S::Error;
+    type Future = TraceContextFuture<S::Future>;
+
+    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        self.inner.poll_ready(cx)
+    }
+
+    fn call(&mut self, mut req: Request<B>) -> Self::Future {
+        let ctx = build_trace_context(&self.generator, req.headers());
+        if self.task_local {
+            req.extensions_mut().insert(ctx.clone());
+            TraceContextFuture::Scoped(TRACE_CONTEXT.scope(ctx, self.inner.call(req)))
+        } else {
+            req.extensions_mut().insert(ctx);
+            TraceContextFuture::Plain(self.inner.call(req))
+        }
     }
 }
 
@@ -218,5 +304,32 @@ mod tests {
         let layer = TraceContextLayer::with_generator(generator);
         let ctx = run(layer, &[]).await;
         assert!(!ctx.traceparent.is_random_trace_id());
+    }
+
+    #[cfg(feature = "task-local")]
+    #[tokio::test]
+    async fn task_local_matches_extension_when_enabled() {
+        let layer = TraceContextLayer::new().enable_task_local();
+        let svc = layer.layer(tower::service_fn(|req: Request<()>| async move {
+            let ext = req.extensions().get::<TraceContext>().cloned().unwrap();
+            let tl = TRACE_CONTEXT.with(|ctx| ctx.clone());
+            assert_eq!(ext, tl);
+            Ok::<_, Infallible>(())
+        }));
+        svc.oneshot(Request::new(())).await.unwrap();
+    }
+
+    #[cfg(feature = "task-local")]
+    #[tokio::test]
+    async fn task_local_not_set_by_default() {
+        let layer = TraceContextLayer::new();
+        let svc = layer.layer(tower::service_fn(|_req: Request<()>| async move {
+            assert!(
+                TRACE_CONTEXT.try_with(|_| ()).is_err(),
+                "task-local should not be set without enable_task_local()"
+            );
+            Ok::<_, Infallible>(())
+        }));
+        svc.oneshot(Request::new(())).await.unwrap();
     }
 }

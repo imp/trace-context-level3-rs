@@ -14,6 +14,7 @@ readme = "README.md"
 
 [workspace.dependencies]
 http = "1.4"
+pin-project = "1"
 rand = "0.9"
 thiserror = "2.0"
 tokio = { version = "1", default-features = false }
