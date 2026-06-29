@@ -292,6 +292,51 @@ impl TraceParent {
     pub fn is_random_trace_id(self) -> bool {
         self.trace_flags.is_random_trace_id()
     }
+
+    /// Returns a new `TraceParent` for the next hop, updating only the `parent-id`.
+    ///
+    /// The `trace-id` and `trace-flags` are forwarded unchanged; reserved flag
+    /// bits are cleared as required by the spec. This is the most common
+    /// mutation: the caller sets `new_parent` to the current span's identifier.
+    #[must_use]
+    pub fn child(&self, new_parent: ParentId) -> Self {
+        Self {
+            version: Self::VERSION_0,
+            trace_id: self.trace_id,
+            parent_id: new_parent,
+            trace_flags: self.trace_flags.with_reserved_cleared(),
+        }
+    }
+
+    /// Returns a new `TraceParent` with the sampled flag changed.
+    ///
+    /// The spec requires that changing the sampling decision MUST be
+    /// accompanied by a new `parent-id`. The `trace-id` is preserved;
+    /// reserved flag bits are cleared.
+    #[must_use]
+    pub fn with_sampled(&self, sampled: bool, new_parent: ParentId) -> Self {
+        Self {
+            version: Self::VERSION_0,
+            trace_id: self.trace_id,
+            parent_id: new_parent,
+            trace_flags: self.trace_flags.with_sampled(sampled).with_reserved_cleared(),
+        }
+    }
+
+    /// Creates a fresh `TraceParent` with entirely new identifiers, restarting
+    /// the trace.
+    ///
+    /// Use this when an incoming `traceparent` cannot be trusted (e.g. it
+    /// crosses a trust boundary) or when no incoming header was present.
+    #[must_use]
+    pub fn restart(trace_id: TraceId, parent_id: ParentId, trace_flags: TraceFlags) -> Self {
+        Self {
+            version: Self::VERSION_0,
+            trace_id,
+            parent_id,
+            trace_flags: trace_flags.with_reserved_cleared(),
+        }
+    }
 }
 
 impl fmt::Display for TraceParent {
@@ -520,6 +565,69 @@ mod tests {
     fn trace_id_from_str() {
         let id: TraceId = "4bf92f3577b34da6a3ce929d0e0e4736".parse().unwrap();
         assert_eq!(id.to_string(), "4bf92f3577b34da6a3ce929d0e0e4736");
+    }
+
+    #[test]
+    fn child_preserves_trace_id_and_flags() {
+        let tp: TraceParent = VALID.parse().unwrap();
+        let new_parent = ParentId::from_bytes([0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08]).unwrap();
+        let child = tp.child(new_parent);
+        assert_eq!(child.trace_id, tp.trace_id);
+        assert_eq!(child.parent_id, new_parent);
+        assert_eq!(child.trace_flags, tp.trace_flags);
+        assert_eq!(child.version, TraceParent::VERSION_0);
+    }
+
+    #[test]
+    fn child_clears_reserved_bits() {
+        let tp: TraceParent = VALID.parse().unwrap();
+        let dirty = TraceParent {
+            trace_flags: TraceFlags::from_u8(0xFF),
+            ..tp
+        };
+        let new_parent = ParentId::from_bytes([0x01; 8]).unwrap();
+        let child = dirty.child(new_parent);
+        assert_eq!(child.trace_flags.as_u8() & !0x03, 0x00);
+    }
+
+    #[test]
+    fn with_sampled_enables_flag_and_updates_parent() {
+        let tp: TraceParent = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00"
+            .parse()
+            .unwrap();
+        let new_parent = ParentId::from_bytes([0xAA; 8]).unwrap();
+        let updated = tp.with_sampled(true, new_parent);
+        assert!(updated.is_sampled());
+        assert_eq!(updated.trace_id, tp.trace_id);
+        assert_eq!(updated.parent_id, new_parent);
+    }
+
+    #[test]
+    fn with_sampled_disables_flag() {
+        let tp: TraceParent = VALID.parse().unwrap(); // sampled=true
+        let new_parent = ParentId::from_bytes([0xBB; 8]).unwrap();
+        let updated = tp.with_sampled(false, new_parent);
+        assert!(!updated.is_sampled());
+        assert_eq!(updated.trace_id, tp.trace_id);
+    }
+
+    #[test]
+    fn restart_produces_fresh_traceparent() {
+        let trace_id = TraceId::from_bytes([0xAB; 16]).unwrap();
+        let parent_id = ParentId::from_bytes([0xCD; 8]).unwrap();
+        let tp = TraceParent::restart(trace_id, parent_id, TraceFlags::SAMPLED);
+        assert_eq!(tp.trace_id, trace_id);
+        assert_eq!(tp.parent_id, parent_id);
+        assert!(tp.is_sampled());
+        assert_eq!(tp.version, TraceParent::VERSION_0);
+    }
+
+    #[test]
+    fn restart_clears_reserved_bits() {
+        let trace_id = TraceId::from_bytes([0x01; 16]).unwrap();
+        let parent_id = ParentId::from_bytes([0x02; 8]).unwrap();
+        let tp = TraceParent::restart(trace_id, parent_id, TraceFlags::from_u8(0xFF));
+        assert_eq!(tp.trace_flags.as_u8() & !0x03, 0x00);
     }
 
     #[test]
