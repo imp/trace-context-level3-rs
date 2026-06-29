@@ -1,6 +1,7 @@
 use super::*;
 
 const MAX_ENTRIES: usize = 32;
+const MAX_ENTRY_LEN: usize = 128;
 
 /// A parsed W3C `tracestate` header value.
 ///
@@ -87,6 +88,32 @@ impl TraceState {
     /// to avoid leaking upstream vendor data across trust boundaries.
     pub fn clear(&mut self) {
         self.0.clear();
+    }
+
+    /// Truncates the entry list so the serialised header value fits within
+    /// `max_len` bytes, using the spec-defined two-step algorithm:
+    ///
+    /// 1. Remove entries whose serialised form (`key=value`) exceeds
+    ///    [`MAX_ENTRY_LEN`] (128) bytes.
+    /// 2. Remove rightmost entries (oldest / least recently updated) until
+    ///    the header fits.
+    pub fn truncate(&mut self, max_len: usize) {
+        self.0
+            .retain(|(k, v)| k.len() + 1 + v.len() <= MAX_ENTRY_LEN);
+        while self.encoded_len() > max_len {
+            self.0.pop();
+        }
+    }
+
+    fn encoded_len(&self) -> usize {
+        if self.0.is_empty() {
+            return 0;
+        }
+        self.0
+            .iter()
+            .map(|(k, v)| k.len() + 1 + v.len())
+            .sum::<usize>()
+            + (self.0.len() - 1)
     }
 }
 
@@ -346,5 +373,78 @@ mod tests {
         let state = TraceState::default();
         assert!(state.is_empty());
         assert_eq!(state.to_string(), "");
+    }
+
+    // --- truncate ---
+
+    #[test]
+    fn truncate_noop_when_already_fits() {
+        let mut state: TraceState = "foo=bar,baz=qux".parse().unwrap();
+        state.truncate(100);
+        assert_eq!(state.len(), 2);
+        assert_eq!(state.get("foo"), Some("bar"));
+        assert_eq!(state.get("baz"), Some("qux"));
+    }
+
+    #[test]
+    fn truncate_keeps_entry_at_exactly_128_bytes() {
+        // "k=" + 126 x's = 128 bytes exactly — must be kept
+        let mut state = TraceState::default();
+        state.insert("k", &"x".repeat(126)).unwrap();
+        state.truncate(usize::MAX);
+        assert!(state.get("k").is_some());
+    }
+
+    #[test]
+    fn truncate_removes_entry_over_128_bytes() {
+        // "k=" + 127 x's = 129 bytes — must be removed in step 1
+        let mut state = TraceState::default();
+        state.insert("small", "value").unwrap();
+        state.insert("k", &"x".repeat(127)).unwrap();
+        state.truncate(usize::MAX);
+        assert_eq!(state.get("k"), None);
+        assert_eq!(state.get("small"), Some("value"));
+    }
+
+    #[test]
+    fn truncate_removes_rightmost_to_fit() {
+        // "a=1,b=2,c=3" = 11 bytes; truncate to 8 should drop "c=3"
+        let mut state: TraceState = "a=1,b=2,c=3".parse().unwrap();
+        state.truncate(8);
+        assert_eq!(state.get("a"), Some("1"));
+        assert_eq!(state.get("b"), Some("2"));
+        assert_eq!(state.get("c"), None);
+        assert!(state.encoded_len() <= 8);
+    }
+
+    #[test]
+    fn truncate_removes_multiple_rightmost() {
+        // "a=1,b=2,c=3" = 11 bytes; truncate to 3 should leave only "a=1"
+        let mut state: TraceState = "a=1,b=2,c=3".parse().unwrap();
+        state.truncate(3);
+        assert_eq!(state.len(), 1);
+        assert_eq!(state.get("a"), Some("1"));
+    }
+
+    #[test]
+    fn truncate_clears_all_when_max_len_zero() {
+        let mut state: TraceState = "a=1,b=2".parse().unwrap();
+        state.truncate(0);
+        assert!(state.is_empty());
+    }
+
+    #[test]
+    fn truncate_step1_then_step2() {
+        // insert() prepends, so insertion order is: a (oldest/rightmost), b, big (newest/leftmost).
+        let mut state = TraceState::default();
+        state.insert("a", "1").unwrap();
+        state.insert("b", "2").unwrap();
+        state.insert("big", &"x".repeat(127)).unwrap(); // 3+1+127 = 131 > 128
+        // Step 1: "big" removed (>128) → internal: [b=2, a=1] = 7 bytes
+        // Step 2: max_len=4 → pop rightmost "a=1" → [b=2] = 3 bytes ≤ 4
+        state.truncate(4);
+        assert_eq!(state.get("big"), None); // removed by step 1
+        assert_eq!(state.get("a"), None); // oldest entry, removed by step 2
+        assert_eq!(state.get("b"), Some("2")); // newest remaining, kept
     }
 }
