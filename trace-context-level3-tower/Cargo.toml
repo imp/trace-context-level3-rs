@@ -18,7 +18,7 @@ tower = { workspace = true, default-features = false }
 
 
 [dev-dependencies]
-tokio = { version = "1", features = ["macros", "rt"] }
+tokio = { workspace = true, features = ["macros", "rt"] }
 tower = { workspace = true, features = ["util"] }
 
 
