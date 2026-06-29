@@ -80,6 +80,14 @@ impl TraceState {
     pub fn is_empty(&self) -> bool {
         self.0.is_empty()
     }
+
+    /// Removes all entries.
+    ///
+    /// Call this on the `tracestate` accompanying a [`TraceParent::restart`]
+    /// to avoid leaking upstream vendor data across trust boundaries.
+    pub fn clear(&mut self) {
+        self.0.clear();
+    }
 }
 
 impl fmt::Display for TraceState {
@@ -322,6 +330,14 @@ mod tests {
         let original = "foo=bar,baz=qux";
         let state: TraceState = original.parse().unwrap();
         assert_eq!(state.to_string(), original);
+    }
+
+    #[test]
+    fn clear_removes_all_entries() {
+        let mut state: TraceState = "foo=bar,baz=qux".parse().unwrap();
+        state.clear();
+        assert!(state.is_empty());
+        assert_eq!(state.to_string(), "");
     }
 
     #[test]

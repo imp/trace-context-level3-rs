@@ -26,6 +26,22 @@ impl TraceId {
     }
 }
 
+#[cfg(feature = "rand")]
+impl TraceId {
+    /// Generates a cryptographically random `TraceId`.
+    ///
+    /// Callers starting a new trace with this ID MUST set the
+    /// [`TraceFlags::RANDOM_TRACE_ID`] flag, or use [`TraceParent::new_root`].
+    #[must_use]
+    pub fn random() -> Self {
+        loop {
+            if let Ok(id) = Self::from_bytes(rand::random()) {
+                return id;
+            }
+        }
+    }
+}
+
 impl fmt::Debug for TraceId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "TraceId({self})")
@@ -82,6 +98,19 @@ impl ParentId {
     #[must_use]
     pub fn as_bytes(&self) -> &[u8; 8] {
         &self.0
+    }
+}
+
+#[cfg(feature = "rand")]
+impl ParentId {
+    /// Generates a cryptographically random `ParentId`.
+    #[must_use]
+    pub fn random() -> Self {
+        loop {
+            if let Ok(id) = Self::from_bytes(rand::random()) {
+                return id;
+            }
+        }
     }
 }
 
@@ -335,6 +364,27 @@ impl TraceParent {
             trace_id,
             parent_id,
             trace_flags: trace_flags.with_reserved_cleared(),
+        }
+    }
+}
+
+#[cfg(feature = "rand")]
+impl TraceParent {
+    /// Creates a new root `TraceParent` with randomly generated identifiers.
+    ///
+    /// Because all 16 bytes of the `trace-id` are random, the
+    /// [`TraceFlags::RANDOM_TRACE_ID`] flag is set automatically as required
+    /// by the spec. Pass `TraceFlags::SAMPLED` to start a sampled trace, or
+    /// `TraceFlags::default()` for unsampled.
+    #[must_use]
+    pub fn new_root(trace_flags: TraceFlags) -> Self {
+        Self {
+            version: Self::VERSION_0,
+            trace_id: TraceId::random(),
+            parent_id: ParentId::random(),
+            trace_flags: trace_flags
+                .with_random_trace_id(true)
+                .with_reserved_cleared(),
         }
     }
 }
@@ -627,6 +677,40 @@ mod tests {
         let trace_id = TraceId::from_bytes([0x01; 16]).unwrap();
         let parent_id = ParentId::from_bytes([0x02; 8]).unwrap();
         let tp = TraceParent::restart(trace_id, parent_id, TraceFlags::from_u8(0xFF));
+        assert_eq!(tp.trace_flags.as_u8() & !0x03, 0x00);
+    }
+
+    #[cfg(feature = "rand")]
+    #[test]
+    fn trace_id_random_is_nonzero() {
+        for _ in 0..100 {
+            let id = TraceId::random();
+            assert_ne!(id.as_bytes(), &[0u8; 16]);
+        }
+    }
+
+    #[cfg(feature = "rand")]
+    #[test]
+    fn parent_id_random_is_nonzero() {
+        for _ in 0..100 {
+            let id = ParentId::random();
+            assert_ne!(id.as_bytes(), &[0u8; 8]);
+        }
+    }
+
+    #[cfg(feature = "rand")]
+    #[test]
+    fn new_root_sets_random_trace_id_flag() {
+        let tp = TraceParent::new_root(TraceFlags::SAMPLED);
+        assert!(tp.is_random_trace_id());
+        assert!(tp.is_sampled());
+        assert_eq!(tp.version, TraceParent::VERSION_0);
+    }
+
+    #[cfg(feature = "rand")]
+    #[test]
+    fn new_root_clears_reserved_bits() {
+        let tp = TraceParent::new_root(TraceFlags::from_u8(0xFF));
         assert_eq!(tp.trace_flags.as_u8() & !0x03, 0x00);
     }
 

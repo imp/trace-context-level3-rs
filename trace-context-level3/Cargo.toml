@@ -9,8 +9,13 @@ keywords.workspace = true
 readme.workspace = true
 
 
+[features]
+rand = ["dep:rand"]
+
+
 [dependencies]
 thiserror.workspace = true
+rand = { workspace = true, optional = true }
 
 
 [lints]
