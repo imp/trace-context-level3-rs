@@ -1,7 +1,3 @@
-use std::fmt;
-use std::ops;
-use std::str;
-
 use super::*;
 
 /// A 16-byte trace identifier, serialized as 32 lowercase hex characters.
