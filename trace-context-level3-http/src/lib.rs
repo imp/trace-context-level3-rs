@@ -49,16 +49,16 @@ impl TraceContext {
     ///
     /// An empty `tracestate` removes the header rather than writing a blank value.
     pub fn inject(&self, headers: &mut HeaderMap) {
-        let tp_val = HeaderValue::from_str(&self.traceparent.to_string())
+        let traceparent = HeaderValue::from_str(&self.traceparent.to_string())
             .expect("traceparent is always valid ASCII");
-        headers.insert(TRACEPARENT.clone(), tp_val);
+        headers.insert(TRACEPARENT.clone(), traceparent);
 
         if self.tracestate.is_empty() {
             headers.remove(&TRACESTATE);
         } else {
-            let ts_val = HeaderValue::from_str(&self.tracestate.to_string())
+            let tracestate = HeaderValue::from_str(&self.tracestate.to_string())
                 .expect("tracestate is always valid ASCII");
-            headers.insert(TRACESTATE.clone(), ts_val);
+            headers.insert(TRACESTATE.clone(), tracestate);
         }
     }
 }

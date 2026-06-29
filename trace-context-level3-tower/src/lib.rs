@@ -137,6 +137,7 @@ fn build_trace_context<G: IdGenerator>(generator: &G, headers: &HeaderMap) -> Tr
 mod tests {
     use std::convert::Infallible;
 
+    use http::HeaderName;
     use http::HeaderValue;
     use tower::ServiceExt;
 
@@ -154,7 +155,7 @@ mod tests {
         let mut req = Request::new(());
         for (name, value) in headers {
             req.headers_mut().insert(
-                http::header::HeaderName::from_bytes(name.as_bytes()).unwrap(),
+                HeaderName::from_bytes(name.as_bytes()).unwrap(),
                 HeaderValue::from_str(value).unwrap(),
             );
         }
