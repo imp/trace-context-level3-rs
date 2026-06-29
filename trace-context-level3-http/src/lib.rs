@@ -3,8 +3,12 @@
 //! Provides [`TraceContext`] for reading and writing the [`TRACEPARENT`] and
 //! [`TRACESTATE`] headers, plus the header name constants themselves.
 
-use http::{HeaderMap, HeaderName, HeaderValue};
-use trace_context_level3::{TraceParent, TraceParentError, TraceState};
+use http::HeaderMap;
+use http::HeaderName;
+use http::HeaderValue;
+use trace_context_level3::TraceParent;
+use trace_context_level3::TraceParentError;
+use trace_context_level3::TraceState;
 
 /// The `traceparent` header name.
 pub const TRACEPARENT: HeaderName = HeaderName::from_static("traceparent");

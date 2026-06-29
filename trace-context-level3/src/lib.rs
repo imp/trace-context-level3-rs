@@ -8,8 +8,12 @@ use std::fmt;
 use std::ops;
 use std::str;
 
-pub use error::{TraceParentError, TraceStateError};
-pub use traceparent::{ParentId, TraceFlags, TraceId, TraceParent};
+pub use error::TraceParentError;
+pub use error::TraceStateError;
+pub use traceparent::ParentId;
+pub use traceparent::TraceFlags;
+pub use traceparent::TraceId;
+pub use traceparent::TraceParent;
 pub use tracestate::TraceState;
 
 mod error;
