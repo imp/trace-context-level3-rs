@@ -32,8 +32,8 @@ impl TraceContext {
     /// A missing or malformed `tracestate` is treated leniently as empty,
     /// per the spec's guidance for intermediaries.
     pub fn extract(headers: &HeaderMap) -> Option<Result<Self, TraceParentError>> {
-        let tp_str = headers.get(&TRACEPARENT)?.to_str().ok()?;
-        let traceparent = match tp_str.parse::<TraceParent>() {
+        let traceparent = headers.get(&TRACEPARENT)?.to_str().ok()?;
+        let traceparent = match traceparent.parse::<TraceParent>() {
             Ok(tp) => tp,
             Err(e) => return Some(Err(e)),
         };
