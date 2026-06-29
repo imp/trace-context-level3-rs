@@ -9,9 +9,7 @@
 //! [`TRACE_CONTEXT`] task-local for the duration of each inner future — no second
 //! header parse.
 
-#[cfg(feature = "task-local")]
 use std::future::Future;
-#[cfg(feature = "task-local")]
 use std::pin::Pin;
 use std::task::Context;
 use std::task::Poll;
@@ -35,24 +33,31 @@ tokio::task_local! {
     pub static TRACE_CONTEXT: TraceContext;
 }
 
-/// Future returned by [`TraceContextService`] when the `task-local` feature is enabled.
+/// Future returned by [`TraceContextService`].
 ///
-/// Wraps the inner future either plainly or inside a [`TRACE_CONTEXT`] scope,
-/// depending on whether task-local storage was enabled on the layer.
-#[cfg(feature = "task-local")]
+/// Always wraps the inner future. When the `task-local` feature is enabled and
+/// the layer was built with [`TraceContextLayer::enable_task_local`], the inner
+/// future runs inside a [`TRACE_CONTEXT`] scope.
 #[pin_project::pin_project(project = TraceContextFutureProj)]
 pub enum TraceContextFuture<F> {
     Plain(#[pin] F),
+    #[cfg(feature = "task-local")]
     Scoped(#[pin] tokio::task::futures::TaskLocalFuture<TraceContext, F>),
 }
 
-#[cfg(feature = "task-local")]
+impl<F> std::fmt::Debug for TraceContextFuture<F> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TraceContextFuture").finish_non_exhaustive()
+    }
+}
+
 impl<F: Future> Future for TraceContextFuture<F> {
     type Output = F::Output;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         match self.project() {
             TraceContextFutureProj::Plain(fut) => fut.poll(cx),
+            #[cfg(feature = "task-local")]
             TraceContextFutureProj::Scoped(fut) => fut.poll(cx),
         }
     }
@@ -148,28 +153,6 @@ pub struct TraceContextService<S, G = RandIdGenerator> {
     task_local: bool,
 }
 
-#[cfg(not(feature = "task-local"))]
-impl<S, G, B> Service<Request<B>> for TraceContextService<S, G>
-where
-    S: Service<Request<B>>,
-    G: IdGenerator,
-{
-    type Response = S::Response;
-    type Error = S::Error;
-    type Future = S::Future;
-
-    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.inner.poll_ready(cx)
-    }
-
-    fn call(&mut self, mut req: Request<B>) -> Self::Future {
-        let ctx = build_trace_context(&self.generator, req.headers());
-        req.extensions_mut().insert(ctx);
-        self.inner.call(req)
-    }
-}
-
-#[cfg(feature = "task-local")]
 impl<S, G, B> Service<Request<B>> for TraceContextService<S, G>
 where
     S: Service<Request<B>>,
@@ -185,13 +168,13 @@ where
 
     fn call(&mut self, mut req: Request<B>) -> Self::Future {
         let ctx = build_trace_context(&self.generator, req.headers());
+        #[cfg(feature = "task-local")]
         if self.task_local {
             req.extensions_mut().insert(ctx.clone());
-            TraceContextFuture::Scoped(TRACE_CONTEXT.scope(ctx, self.inner.call(req)))
-        } else {
-            req.extensions_mut().insert(ctx);
-            TraceContextFuture::Plain(self.inner.call(req))
+            return TraceContextFuture::Scoped(TRACE_CONTEXT.scope(ctx, self.inner.call(req)));
         }
+        req.extensions_mut().insert(ctx);
+        TraceContextFuture::Plain(self.inner.call(req))
     }
 }
 
