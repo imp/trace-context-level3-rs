@@ -1,14 +1,8 @@
-pub fn add(left: u64, right: u64) -> u64 {
-    left + right
-}
+pub use error::TraceParentError;
+pub use error::TraceStateError;
+pub use traceparent::ParentId;
+pub use traceparent::TraceId;
+pub use traceparent::TraceParent;
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn it_works() {
-        let result = add(2, 2);
-        assert_eq!(result, 4);
-    }
-}
+mod error;
+mod traceparent;
