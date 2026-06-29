@@ -1,5 +1,5 @@
 [workspace]
-members = ["trace-context-level3", "trace-context-level3-http"]
+members = ["trace-context-level3", "trace-context-level3-http", "trace-context-level3-tower"]
 resolver = "3"
 
 
@@ -16,8 +16,10 @@ readme = "README.md"
 http = "1.4"
 rand = "0.9"
 thiserror = "2.0"
+tower = { version = "0.5", default-features = false }
 
 trace-context-level3 = { path = "trace-context-level3" }
+trace-context-level3-http = { path = "trace-context-level3-http" }
 
 
 [workspace.lints.clippy]

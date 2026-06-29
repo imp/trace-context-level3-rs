@@ -1,0 +1,26 @@
+[package]
+name = "trace-context-level3-tower"
+description = "W3C Trace Context Level 3 — tower middleware storing context in request extensions"
+
+version.workspace = true
+edition.workspace = true
+repository.workspace = true
+license.workspace = true
+keywords.workspace = true
+readme.workspace = true
+
+
+[dependencies]
+trace-context-level3 = { workspace = true, features = ["rand"] }
+trace-context-level3-http.workspace = true
+http.workspace = true
+tower = { workspace = true, default-features = false }
+
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt"] }
+tower = { workspace = true, features = ["util"] }
+
+
+[lints]
+workspace = true
