@@ -11,15 +11,31 @@
 //!
 //! # Example
 //!
-//! ```rust,no_run
-//! use axum::{Router, routing::get};
+//! ```rust
+//! use axum::Router;
+//! use axum::body::Body;
+//! use axum::routing::get;
+//! use http::{Request, StatusCode};
+//! use tower::ServiceExt as _;
 //! use trace_context_level3_axum::TraceContext;
 //!
 //! async fn handler(ctx: TraceContext) -> String {
 //!     ctx.traceparent.to_string()
 //! }
 //!
+//! # #[tokio::main(flavor = "current_thread")]
+//! # async fn main() {
 //! let app: Router = Router::new().route("/", get(handler));
+//!
+//! let req = Request::builder()
+//!     .uri("/")
+//!     .header("traceparent", "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01")
+//!     .body(Body::empty())
+//!     .unwrap();
+//!
+//! let resp = app.oneshot(req).await.unwrap();
+//! assert_eq!(resp.status(), StatusCode::OK);
+//! # }
 //! ```
 
 use std::ops::Deref;
