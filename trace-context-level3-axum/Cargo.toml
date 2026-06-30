@@ -1,6 +1,6 @@
 [package]
-name = "trace-context-level3-tower"
-description = "W3C Trace Context Level 3 — tower middleware storing context in request extensions"
+name = "trace-context-level3-axum"
+description = "W3C Trace Context Level 3 — axum extractor for TraceContext"
 
 version.workspace = true
 edition.workspace = true
@@ -10,20 +10,15 @@ keywords.workspace = true
 readme.workspace = true
 
 
-[features]
-task-local = ["dep:tokio"]
-
-
 [dependencies]
+axum-core.workspace = true
 http.workspace = true
-pin-project.workspace = true
-tokio = { workspace = true, features = ["rt"], optional = true }
-tower = { workspace = true, default-features = false }
-trace-context-level3 = { workspace = true, features = ["rand"] }
+trace-context-level3.workspace = true
 trace-context-level3-http.workspace = true
 
 
 [dev-dependencies]
+axum = { workspace = true, features = ["http1", "tokio"] }
 tokio = { workspace = true, features = ["macros", "rt"] }
 tower = { workspace = true, features = ["util"] }
 

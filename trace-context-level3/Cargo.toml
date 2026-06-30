@@ -15,8 +15,8 @@ rand = ["dep:rand"]
 
 
 [dependencies]
-thiserror.workspace = true
 rand = { workspace = true, optional = true }
+thiserror.workspace = true
 
 
 [lints]

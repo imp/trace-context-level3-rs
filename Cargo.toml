@@ -1,5 +1,10 @@
 [workspace]
-members = ["trace-context-level3", "trace-context-level3-http", "trace-context-level3-tower"]
+members = [
+    "trace-context-level3",
+    "trace-context-level3-axum",
+    "trace-context-level3-http",
+    "trace-context-level3-tower",
+]
 resolver = "3"
 
 
@@ -13,6 +18,8 @@ readme = "README.md"
 
 
 [workspace.dependencies]
+axum = { version = "0.8", default-features = false }
+axum-core = "0.5"
 http = "1.4"
 pin-project = "1"
 rand = "0.9"
