@@ -55,3 +55,17 @@ pub enum TraceStateError {
     #[error("duplicate tracestate key: {0:?}")]
     DuplicateKey(String),
 }
+
+impl TraceStateError {
+    pub fn invalid_key(key: impl Into<String>) -> Self {
+        Self::InvalidKey(key.into())
+    }
+
+    pub fn invalid_value(value: impl Into<String>) -> Self {
+        Self::InvalidValue(value.into())
+    }
+
+    pub fn duplicate_key(key: impl Into<String>) -> Self {
+        Self::DuplicateKey(key.into())
+    }
+}

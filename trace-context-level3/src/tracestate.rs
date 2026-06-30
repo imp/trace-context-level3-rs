@@ -44,10 +44,10 @@ impl TraceState {
     /// or [`TraceStateError::TooManyEntries`].
     pub fn insert(&mut self, key: &str, value: &str) -> Result<(), TraceStateError> {
         if !is_valid_key(key) {
-            return Err(TraceStateError::InvalidKey(key.to_owned()));
+            return Err(TraceStateError::invalid_key(key));
         }
         if !is_valid_value(value) {
-            return Err(TraceStateError::InvalidValue(value.to_owned()));
+            return Err(TraceStateError::invalid_value(value));
         }
         // Remove any existing entry first so a replacement never hits the cap.
         self.0.retain(|(k, _)| k != key);
@@ -116,8 +116,7 @@ impl TraceState {
         let mut seen = std::collections::HashSet::new();
         let entries = s
             .split(',')
-            .filter_map(|item| item.trim_matches(&[' ', '\t']).split_once('='))
-            .filter(|(key, value)| is_valid_key(key) && is_valid_value(value))
+            .filter_map(|item| Self::validate_item(item.trim_matches([' ', '\t'])).ok())
             .filter(|&(key, _)| seen.insert(key))
             .take(MAX_ENTRIES)
             .map(|(key, value)| (key.to_owned(), value.to_owned()))
@@ -136,6 +135,19 @@ impl TraceState {
             .map(|(k, v)| k.len() + 1 + v.len()) // +1 for '='
             .sum::<usize>()
             + (self.0.len() - 1) // n-1 ',' separators between entries
+    }
+
+    fn validate_item(item: &str) -> Result<(&str, &str), TraceStateError> {
+        let (key, value) = item
+            .split_once('=')
+            .ok_or_else(|| TraceStateError::invalid_key(item))?;
+        if !is_valid_key(key) {
+            return Err(TraceStateError::invalid_key(key));
+        }
+        if !is_valid_value(value) {
+            return Err(TraceStateError::invalid_value(value));
+        }
+        Ok((key, value))
     }
 }
 
@@ -159,21 +171,13 @@ impl str::FromStr for TraceState {
         let entries = s
             .split(',')
             .filter_map(|m| {
-                let m = m.trim_matches(&[' ', '\t']);
+                let m = m.trim_matches([' ', '\t']);
                 (!m.is_empty()).then_some(m)
             })
             .map(|member| {
-                let (key, value) = member
-                    .split_once('=')
-                    .ok_or_else(|| TraceStateError::InvalidKey(member.to_owned()))?;
-                if !is_valid_key(key) {
-                    return Err(TraceStateError::InvalidKey(key.to_owned()));
-                }
-                if !is_valid_value(value) {
-                    return Err(TraceStateError::InvalidValue(value.to_owned()));
-                }
+                let (key, value) = Self::validate_item(member)?;
                 if !seen.insert(key) {
-                    return Err(TraceStateError::DuplicateKey(key.to_owned()));
+                    return Err(TraceStateError::duplicate_key(key));
                 }
                 Ok((key.to_owned(), value.to_owned()))
             })
@@ -383,11 +387,8 @@ mod tests {
 
     #[test]
     fn insert_rejects_value_trailing_space() {
-        let mut state = TraceState::default();
-        assert!(matches!(
-            state.insert("foo", "bar "),
-            Err(TraceStateError::InvalidValue(_))
-        ));
+        let err = TraceState::default().insert("foo", "bar ").unwrap_err();
+        assert!(matches!(err, TraceStateError::InvalidValue(_)));
     }
 
     #[test]
