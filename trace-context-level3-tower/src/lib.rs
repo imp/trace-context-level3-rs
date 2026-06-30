@@ -4,6 +4,14 @@
 //! advances the span (or starts a new root), and stores the resulting
 //! [`TraceContext`] in [`http::Request`] extensions for downstream handlers.
 //!
+//! [`TraceResponseLayer`] reads that stored context from request extensions and
+//! appends a `Server-Timing: trace;desc=<traceparent>` header to the HTTP response,
+//! implementing the Level 3 response propagation. It must be placed after (inside)
+//! [`TraceContextLayer`] in the middleware stack.
+//!
+//! [`TraceContextClientLayer`] injects the current context into outgoing request
+//! headers for downstream HTTP calls.
+//!
 //! With the `task-local` feature enabled, calling
 //! [`TraceContextLayer::enable_task_local`] additionally stores the context in the
 //! [`TRACE_CONTEXT`] task-local for the duration of each inner future — no second
@@ -16,6 +24,7 @@ use std::task::Poll;
 
 use http::HeaderMap;
 use http::Request;
+use http::Response;
 use tower::Layer;
 use tower::Service;
 use trace_context_level3::IdGenerator;
@@ -25,6 +34,7 @@ use trace_context_level3::TraceId;
 use trace_context_level3::TraceParent;
 use trace_context_level3::TraceState;
 use trace_context_level3_http::TraceContext;
+use trace_context_level3_http::inject_server_timing;
 
 #[cfg(feature = "task-local")]
 tokio::task_local! {
@@ -271,6 +281,111 @@ fn current_trace_context<B>(req: &Request<B>) -> Option<TraceContext> {
     None
 }
 
+/// Tower [`Layer`] that appends the current trace context to HTTP response
+/// headers as `Server-Timing: trace;desc=<traceparent>`.
+///
+/// Reads the [`TraceContext`] from request extensions (set by [`TraceContextLayer`])
+/// and appends to any existing `Server-Timing` headers in the response.
+///
+/// **Ordering:** this layer must be placed **after** (inside) [`TraceContextLayer`]
+/// so that the context is already in extensions when this layer's service is called:
+///
+/// ```rust,no_run
+/// use tower::ServiceBuilder;
+/// use trace_context_level3_tower::{TraceContextLayer, TraceResponseLayer};
+/// # use tower::service_fn;
+/// # async fn handler(_: http::Request<()>) -> Result<http::Response<()>, std::convert::Infallible> { Ok(http::Response::new(())) }
+///
+/// let svc = ServiceBuilder::new()
+///     .layer(TraceContextLayer::new())   // outer: extracts/creates context
+///     .layer(TraceResponseLayer::new())  // inner: adds Server-Timing to response
+///     .service(service_fn(handler));
+/// ```
+#[derive(Clone, Debug, Default)]
+pub struct TraceResponseLayer;
+
+impl TraceResponseLayer {
+    /// Creates a new [`TraceResponseLayer`].
+    #[must_use]
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl<S> Layer<S> for TraceResponseLayer {
+    type Service = TraceResponseService<S>;
+
+    fn layer(&self, inner: S) -> Self::Service {
+        TraceResponseService { inner }
+    }
+}
+
+/// Tower [`Service`] produced by [`TraceResponseLayer`].
+#[derive(Clone, Debug)]
+pub struct TraceResponseService<S> {
+    inner: S,
+}
+
+impl<S, B, RespBody> Service<Request<B>> for TraceResponseService<S>
+where
+    S: Service<Request<B>, Response = Response<RespBody>>,
+{
+    type Response = Response<RespBody>;
+    type Error = S::Error;
+    type Future = TraceResponseFuture<S::Future>;
+
+    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        self.inner.poll_ready(cx)
+    }
+
+    fn call(&mut self, req: Request<B>) -> Self::Future {
+        let traceparent = req
+            .extensions()
+            .get::<TraceContext>()
+            .map(|c| c.traceparent);
+        TraceResponseFuture {
+            traceparent,
+            inner: self.inner.call(req),
+        }
+    }
+}
+
+/// Future returned by [`TraceResponseService`].
+#[pin_project::pin_project]
+pub struct TraceResponseFuture<F> {
+    traceparent: Option<TraceParent>,
+    #[pin]
+    inner: F,
+}
+
+impl<F> std::fmt::Debug for TraceResponseFuture<F> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TraceResponseFuture")
+            .finish_non_exhaustive()
+    }
+}
+
+impl<F, B, E> Future for TraceResponseFuture<F>
+where
+    F: Future<Output = Result<Response<B>, E>>,
+{
+    type Output = F::Output;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let this = self.project();
+        match this.inner.poll(cx) {
+            Poll::Pending => Poll::Pending,
+            Poll::Ready(Err(e)) => Poll::Ready(Err(e)),
+            Poll::Ready(Ok(mut resp)) => {
+                if let Some(tp) = this.traceparent {
+                    inject_server_timing(tp, resp.headers_mut());
+                }
+                Poll::Ready(Ok(resp))
+            }
+        }
+    }
+}
+
 fn build_trace_context<G: IdGenerator>(generator: &G, headers: &HeaderMap) -> TraceContext {
     match TraceContext::extract(headers) {
         Ok(Some(ctx)) => TraceContext {
@@ -300,6 +415,7 @@ mod tests {
     use std::convert::Infallible;
 
     use http::HeaderValue;
+    use tower::ServiceBuilder;
     use tower::ServiceExt;
     use trace_context_level3_http::TRACEPARENT;
     use trace_context_level3_http::TRACESTATE;
@@ -425,6 +541,92 @@ mod tests {
             Ok::<_, Infallible>(())
         }));
         svc.oneshot(Request::new(())).await.unwrap();
+    }
+
+    // --- TraceResponseLayer ---
+
+    #[tokio::test]
+    async fn response_layer_injects_server_timing() {
+        use trace_context_level3_http::SERVER_TIMING;
+        use trace_context_level3_http::extract_server_timing;
+
+        let svc = ServiceBuilder::new()
+            .layer(TraceContextLayer::new())
+            .layer(TraceResponseLayer::new())
+            .service(tower::service_fn(|_req: Request<()>| async move {
+                Ok::<_, Infallible>(http::Response::new(()))
+            }));
+
+        let req = Request::builder()
+            .header(TRACEPARENT, VALID_TP)
+            .body(())
+            .unwrap();
+        let resp = svc.oneshot(req).await.unwrap();
+
+        let tp = extract_server_timing(resp.headers())
+            .expect("Server-Timing: trace;desc=... must be present");
+        // trace-id must match the incoming request's trace-id (child span, same trace).
+        assert_eq!(tp.trace_id.to_string(), "4bf92f3577b34da6a3ce929d0e0e4736");
+        assert!(resp.headers().contains_key(SERVER_TIMING));
+    }
+
+    #[tokio::test]
+    async fn response_layer_injects_server_timing_on_root_span() {
+        use trace_context_level3_http::extract_server_timing;
+
+        let svc = ServiceBuilder::new()
+            .layer(TraceContextLayer::new())
+            .layer(TraceResponseLayer::new())
+            .service(tower::service_fn(|_req: Request<()>| async move {
+                Ok::<_, Infallible>(http::Response::new(()))
+            }));
+
+        // No incoming traceparent — middleware creates a root span.
+        let resp = svc.oneshot(Request::new(())).await.unwrap();
+        let tp = extract_server_timing(resp.headers())
+            .expect("Server-Timing must be present even for root spans");
+        assert!(tp.is_random_trace_id());
+    }
+
+    #[tokio::test]
+    async fn response_layer_preserves_existing_server_timing() {
+        use trace_context_level3_http::SERVER_TIMING;
+
+        let svc = ServiceBuilder::new()
+            .layer(TraceContextLayer::new())
+            .layer(TraceResponseLayer::new())
+            .service(tower::service_fn(|_req: Request<()>| async move {
+                let mut resp = http::Response::new(());
+                resp.headers_mut()
+                    .insert(SERVER_TIMING, http::HeaderValue::from_static("db;dur=53"));
+                Ok::<_, Infallible>(resp)
+            }));
+
+        let resp = svc.oneshot(Request::new(())).await.unwrap();
+        let values: Vec<_> = resp
+            .headers()
+            .get_all(SERVER_TIMING)
+            .iter()
+            .map(|v| v.to_str().unwrap())
+            .collect();
+        assert_eq!(values.len(), 2, "must have original + trace metric");
+        assert!(values.iter().any(|v| v.starts_with("trace;desc=")));
+        assert!(values.iter().any(|v| *v == "db;dur=53"));
+    }
+
+    #[tokio::test]
+    async fn response_layer_no_server_timing_without_context() {
+        use trace_context_level3_http::SERVER_TIMING;
+
+        // TraceResponseLayer alone (no TraceContextLayer) → no context in extensions.
+        let svc = ServiceBuilder::new()
+            .layer(TraceResponseLayer::new())
+            .service(tower::service_fn(|_req: Request<()>| async move {
+                Ok::<_, Infallible>(http::Response::new(()))
+            }));
+
+        let resp = svc.oneshot(Request::new(())).await.unwrap();
+        assert!(!resp.headers().contains_key(SERVER_TIMING));
     }
 
     // --- TraceContextClientLayer ---

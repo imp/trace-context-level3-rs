@@ -1,7 +1,9 @@
 //! W3C Trace Context Level 3 — HTTP header extraction and injection.
 //!
 //! Provides [`TraceContext`] for reading and writing the [`TRACEPARENT`] and
-//! [`TRACESTATE`] headers, plus the header name constants themselves.
+//! [`TRACESTATE`] request headers, plus [`inject_server_timing`] /
+//! [`extract_server_timing`] for the `Server-Timing: trace;desc=…` response
+//! header defined in the Level 3 spec.
 
 use http::HeaderMap;
 use http::HeaderName;
@@ -15,6 +17,13 @@ pub const TRACEPARENT: HeaderName = HeaderName::from_static("traceparent");
 
 /// The `tracestate` header name.
 pub const TRACESTATE: HeaderName = HeaderName::from_static("tracestate");
+
+/// The `server-timing` response header name.
+///
+/// W3C Trace Context Level 3 carries the response trace context as the `trace`
+/// metric of this standard HTTP header:
+/// `Server-Timing: trace;desc=<traceparent-value>`.
+pub const SERVER_TIMING: HeaderName = HeaderName::from_static("server-timing");
 
 /// The trace context extracted from HTTP headers: `traceparent` and
 /// `tracestate` treated as a single propagation unit.
@@ -69,6 +78,82 @@ impl TraceContext {
             headers.insert(TRACESTATE.clone(), tracestate);
         }
     }
+}
+
+/// Injects the trace context into HTTP response headers as a
+/// `Server-Timing: trace;desc=<traceparent>` metric.
+///
+/// Uses `append` so any existing `Server-Timing` headers are preserved.
+///
+/// # Example
+///
+/// ```
+/// use http::HeaderMap;
+/// use trace_context_level3::TraceParent;
+/// use trace_context_level3_http::{SERVER_TIMING, inject_server_timing};
+///
+/// let tp: TraceParent = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
+///     .parse()
+///     .unwrap();
+/// let mut headers = HeaderMap::new();
+/// inject_server_timing(&tp, &mut headers);
+/// let v = headers.get(SERVER_TIMING).unwrap().to_str().unwrap();
+/// assert!(v.starts_with("trace;desc=00-4bf92f3577b34da6a3ce929d0e0e4736"));
+/// ```
+pub fn inject_server_timing(traceparent: &TraceParent, headers: &mut HeaderMap) {
+    let value = format!("trace;desc={traceparent}");
+    if let Ok(v) = HeaderValue::from_str(&value) {
+        headers.append(SERVER_TIMING.clone(), v);
+    }
+}
+
+/// Extracts a trace context from `Server-Timing` HTTP response headers.
+///
+/// Searches all `Server-Timing` header values for a metric named `trace` and
+/// parses its `desc` parameter as a `traceparent` value. Metric name and
+/// parameter name matching are ASCII case-insensitive per the HTTP spec.
+/// Returns `None` when no valid `trace` metric is found.
+///
+/// # Example
+///
+/// ```
+/// use http::{HeaderMap, HeaderValue};
+/// use trace_context_level3_http::{SERVER_TIMING, extract_server_timing};
+///
+/// let mut headers = HeaderMap::new();
+/// headers.insert(
+///     SERVER_TIMING,
+///     HeaderValue::from_static(
+///         "trace;desc=00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+///     ),
+/// );
+/// let tp = extract_server_timing(&headers).unwrap();
+/// assert_eq!(tp.trace_id.to_string(), "4bf92f3577b34da6a3ce929d0e0e4736");
+/// ```
+pub fn extract_server_timing(headers: &HeaderMap) -> Option<TraceParent> {
+    headers
+        .get_all(&SERVER_TIMING)
+        .iter()
+        .filter_map(|v| v.to_str().ok())
+        .flat_map(|v| v.split(','))
+        .find_map(parse_trace_timing_metric)
+}
+
+/// Parses one Server-Timing metric entry and returns the `TraceParent` from
+/// the `desc` parameter when the metric is named `trace`.
+fn parse_trace_timing_metric(metric: &str) -> Option<TraceParent> {
+    let metric = metric.trim();
+    let (name, params) = metric.split_once(';')?;
+    if !name.trim().eq_ignore_ascii_case("trace") {
+        return None;
+    }
+    params.split(';').find_map(|param| {
+        let (key, val) = param.trim().split_once('=')?;
+        if !key.trim().eq_ignore_ascii_case("desc") {
+            return None;
+        }
+        val.trim().trim_matches('"').parse::<TraceParent>().ok()
+    })
 }
 
 /// Concatenates all `tracestate` header values with a comma separator,
@@ -209,6 +294,103 @@ mod tests {
         );
         let err = TraceContext::extract(&headers).unwrap_err();
         assert_eq!(err, TraceParentError::MultipleValues);
+    }
+
+    // ── Server-Timing (traceresponse) ────────────────────────────────────────
+
+    #[test]
+    fn inject_server_timing_writes_trace_metric() {
+        let tp: TraceParent = VALID_TP.parse().unwrap();
+        let mut headers = HeaderMap::new();
+        inject_server_timing(&tp, &mut headers);
+        let v = headers.get(&SERVER_TIMING).unwrap().to_str().unwrap();
+        assert_eq!(v, format!("trace;desc={VALID_TP}"));
+    }
+
+    #[test]
+    fn inject_server_timing_appends_not_replaces() {
+        let tp: TraceParent = VALID_TP.parse().unwrap();
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            SERVER_TIMING,
+            HeaderValue::from_static("db;dur=53,app;dur=47.2"),
+        );
+        inject_server_timing(&tp, &mut headers);
+        // Two Server-Timing entries: original + the trace one.
+        let values: Vec<_> = headers
+            .get_all(&SERVER_TIMING)
+            .iter()
+            .map(|v| v.to_str().unwrap())
+            .collect();
+        assert_eq!(values.len(), 2);
+        assert!(values.iter().any(|v| v.starts_with("trace;desc=")));
+        assert!(values.iter().any(|v| v.starts_with("db;")));
+    }
+
+    #[test]
+    fn extract_server_timing_parses_trace_metric() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            SERVER_TIMING,
+            HeaderValue::from_str(&format!("trace;desc={VALID_TP}")).unwrap(),
+        );
+        let tp = extract_server_timing(&headers).unwrap();
+        assert_eq!(tp.to_string(), VALID_TP);
+    }
+
+    #[test]
+    fn extract_server_timing_finds_trace_among_other_metrics() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            SERVER_TIMING,
+            HeaderValue::from_str(&format!("db;dur=53,trace;desc={VALID_TP},app;dur=12")).unwrap(),
+        );
+        let tp = extract_server_timing(&headers).unwrap();
+        assert_eq!(tp.to_string(), VALID_TP);
+    }
+
+    #[test]
+    fn extract_server_timing_case_insensitive_metric_name() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            SERVER_TIMING,
+            HeaderValue::from_str(&format!("Trace;desc={VALID_TP}")).unwrap(),
+        );
+        assert!(extract_server_timing(&headers).is_some());
+    }
+
+    #[test]
+    fn extract_server_timing_handles_quoted_desc() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            SERVER_TIMING,
+            HeaderValue::from_str(&format!("trace;desc=\"{VALID_TP}\"")).unwrap(),
+        );
+        let tp = extract_server_timing(&headers).unwrap();
+        assert_eq!(tp.to_string(), VALID_TP);
+    }
+
+    #[test]
+    fn extract_server_timing_returns_none_when_absent() {
+        assert!(extract_server_timing(&HeaderMap::new()).is_none());
+    }
+
+    #[test]
+    fn extract_server_timing_returns_none_on_invalid_desc() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            SERVER_TIMING,
+            HeaderValue::from_static("trace;desc=not-a-traceparent"),
+        );
+        assert!(extract_server_timing(&headers).is_none());
+    }
+
+    #[test]
+    fn inject_then_extract_server_timing_roundtrip() {
+        let tp: TraceParent = VALID_TP.parse().unwrap();
+        let mut headers = HeaderMap::new();
+        inject_server_timing(&tp, &mut headers);
+        assert_eq!(extract_server_timing(&headers).unwrap(), tp);
     }
 
     #[test]

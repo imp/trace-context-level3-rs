@@ -102,11 +102,28 @@ trace-context-level3-tower = { git = "https://github.com/imp/trace-context-level
 
 ```rust
 use tower::ServiceBuilder;
-use trace_context_level3_tower::TraceContextLayer;
+use trace_context_level3_tower::{TraceContextLayer, TraceResponseLayer};
 
 let service = ServiceBuilder::new()
-    .layer(TraceContextLayer::new())
+    .layer(TraceContextLayer::new())   // outer: extracts/creates context
+    .layer(TraceResponseLayer::new())  // inner: adds Server-Timing to response
     .service(inner);
+```
+
+### Response propagation (`Server-Timing`)
+
+`TraceResponseLayer` appends `Server-Timing: trace;desc=<traceparent>` to every
+HTTP response, implementing the Level 3 response header. It must be placed after
+`TraceContextLayer` in the stack (inside it, closer to the handler).
+
+On the receiving side, `extract_server_timing` reads the header back:
+
+```rust
+use trace_context_level3_http::extract_server_timing;
+
+if let Some(tp) = extract_server_timing(response.headers()) {
+    println!("server span: {tp}");
+}
 ```
 
 ### Task-local storage
@@ -235,6 +252,7 @@ Runs `fmt-check`, `clippy`, `test`, and feature-variant tests in parallel.
   are merged; malformed entries are silently dropped)
 - `RANDOM_TRACE_ID` flag (`0x02`) set on freshly generated root spans
 - Multiple `traceparent` headers → `TraceParentError::MultipleValues`
+- Response propagation via `Server-Timing: trace;desc=<traceparent>` (Level 3)
 
 ---
 
