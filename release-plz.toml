@@ -1,0 +1,10 @@
+[workspace]
+# Generate a CHANGELOG.md for each crate from conventional commits.
+changelog_update = true
+
+# Create a GitHub release (with changelog as body) when a release PR is merged.
+git_release_enable = true
+
+# Use the crate name as the tag prefix for multi-crate workspaces, e.g.
+# trace-context-level3-v0.2.0, trace-context-level3-http-v0.2.0, …
+git_tag_name = "{{ package }}-v{{ version }}"

@@ -1,0 +1,33 @@
+name: Release-plz
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  release-plz:
+    name: Release-plz
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write      # create tags, GitHub releases, push CHANGELOG commits
+      pull-requests: write # open / update the release PR
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # full history — release-plz needs it to read commits
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Run release-plz
+        uses: MarcoIeni/release-plz-action@v0.5
+        env:
+          # GITHUB_TOKEN is provided automatically; it opens the release PR and
+          # creates GitHub releases.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # CARGO_REGISTRY_TOKEN must be added as a repository secret.
+          # Generate one at https://crates.io/settings/tokens (scope: publish-new,
+          # publish-update) and store it under Settings → Secrets → Actions.
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}

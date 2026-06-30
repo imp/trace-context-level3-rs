@@ -481,7 +481,7 @@ checksum = "8df9b6e13f2d32c91b9bd719c00d1958837bc7dec474d94952798cc8e69eeec3"
 
 [[package]]
 name = "trace-context-level3"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "rand",
  "serde_core",
@@ -491,7 +491,7 @@ dependencies = [
 
 [[package]]
 name = "trace-context-level3-axum"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "axum",
  "axum-core",
@@ -505,7 +505,7 @@ dependencies = [
 
 [[package]]
 name = "trace-context-level3-http"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "http",
  "serde_core",
@@ -515,7 +515,7 @@ dependencies = [
 
 [[package]]
 name = "trace-context-level3-tower"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "http",
  "pin-project",
