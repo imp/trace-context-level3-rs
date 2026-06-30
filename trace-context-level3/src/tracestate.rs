@@ -116,7 +116,7 @@ impl TraceState {
         let mut seen = std::collections::HashSet::new();
         let entries = s
             .split(',')
-            .filter_map(|item| item.trim_matches(|c| c == ' ' || c == '\t').split_once('='))
+            .filter_map(|item| item.trim_matches(&[' ', '\t']).split_once('='))
             .filter(|(key, value)| is_valid_key(key) && is_valid_value(value))
             .filter(|&(key, _)| seen.insert(key))
             .take(MAX_ENTRIES)
@@ -159,7 +159,7 @@ impl str::FromStr for TraceState {
         let entries = s
             .split(',')
             .filter_map(|m| {
-                let m = m.trim_matches(|c| c == ' ' || c == '\t');
+                let m = m.trim_matches(&[' ', '\t']);
                 (!m.is_empty()).then_some(m)
             })
             .map(|member| {
