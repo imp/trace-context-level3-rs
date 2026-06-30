@@ -304,73 +304,117 @@ mod tests {
 
     #[test]
     fn rejects_multi_tenant_key_double_at() {
-        assert!("a@@b=v".parse::<TraceState>().is_err());
-        assert!("a@b@c=v".parse::<TraceState>().is_err());
+        assert!(matches!(
+            "a@@b=v".parse::<TraceState>().unwrap_err(),
+            TraceStateError::InvalidKey(_)
+        ));
+        assert!(matches!(
+            "a@b@c=v".parse::<TraceState>().unwrap_err(),
+            TraceStateError::InvalidKey(_)
+        ));
     }
 
     #[test]
     fn rejects_multi_tenant_key_empty_tenant() {
-        assert!("@system=v".parse::<TraceState>().is_err());
+        assert!(matches!(
+            "@system=v".parse::<TraceState>().unwrap_err(),
+            TraceStateError::InvalidKey(_)
+        ));
     }
 
     #[test]
     fn rejects_multi_tenant_key_empty_system() {
-        assert!("tenant@=v".parse::<TraceState>().is_err());
+        assert!(matches!(
+            "tenant@=v".parse::<TraceState>().unwrap_err(),
+            TraceStateError::InvalidKey(_)
+        ));
     }
 
     #[test]
     fn rejects_multi_tenant_key_system_starts_with_digit() {
-        assert!("tenant@1sys=v".parse::<TraceState>().is_err());
+        assert!(matches!(
+            "tenant@1sys=v".parse::<TraceState>().unwrap_err(),
+            TraceStateError::InvalidKey(_)
+        ));
     }
 
     #[test]
     fn rejects_multi_tenant_key_system_with_underscore() {
         // system-id allows only lcalpha / DIGIT / "-", not "_"
-        assert!("tenant@sys_id=v".parse::<TraceState>().is_err());
+        assert!(matches!(
+            "tenant@sys_id=v".parse::<TraceState>().unwrap_err(),
+            TraceStateError::InvalidKey(_)
+        ));
     }
 
     #[test]
     fn rejects_multi_tenant_key_tenant_id_too_long() {
         let tenant = "a".repeat(242);
-        assert!(format!("{tenant}@sys=v").parse::<TraceState>().is_err());
+        assert!(matches!(
+            format!("{tenant}@sys=v").parse::<TraceState>().unwrap_err(),
+            TraceStateError::InvalidKey(_)
+        ));
     }
 
     #[test]
     fn rejects_multi_tenant_key_system_id_too_long() {
         let system = "a".repeat(15);
-        assert!(format!("tenant@{system}=v").parse::<TraceState>().is_err());
+        assert!(matches!(
+            format!("tenant@{system}=v")
+                .parse::<TraceState>()
+                .unwrap_err(),
+            TraceStateError::InvalidKey(_)
+        ));
     }
 
     #[test]
     fn rejects_simple_key_with_at() {
         // bare @ without a valid multi-tenant structure
-        assert!("@=v".parse::<TraceState>().is_err());
+        assert!(matches!(
+            "@=v".parse::<TraceState>().unwrap_err(),
+            TraceStateError::InvalidKey(_)
+        ));
     }
 
     #[test]
     fn rejects_key_uppercase() {
-        assert!("Vendor=val".parse::<TraceState>().is_err());
+        assert!(matches!(
+            "Vendor=val".parse::<TraceState>().unwrap_err(),
+            TraceStateError::InvalidKey(_)
+        ));
     }
 
     #[test]
     fn rejects_key_starts_with_dash() {
-        assert!("-vendor=val".parse::<TraceState>().is_err());
+        assert!(matches!(
+            "-vendor=val".parse::<TraceState>().unwrap_err(),
+            TraceStateError::InvalidKey(_)
+        ));
     }
 
     #[test]
     fn rejects_key_too_long() {
         let key = "a".repeat(257);
-        assert!(format!("{key}=val").parse::<TraceState>().is_err());
+        assert!(matches!(
+            format!("{key}=val").parse::<TraceState>().unwrap_err(),
+            TraceStateError::InvalidKey(_)
+        ));
     }
 
     #[test]
     fn rejects_value_with_comma() {
-        assert!("foo=bar,baz".parse::<TraceState>().is_err());
+        assert!(matches!(
+            "foo=bar,baz".parse::<TraceState>().unwrap_err(),
+            TraceStateError::InvalidKey(_)
+        ));
     }
 
     #[test]
     fn rejects_value_empty() {
-        assert!("foo=".parse::<TraceState>().is_err());
+        assert!(matches!(
+            "foo=".parse::<TraceState>().unwrap_err(),
+            TraceStateError::InvalidValue(_)
+        ));
     }
 
     #[test]
@@ -379,10 +423,10 @@ mod tests {
             .map(|i| format!("k{i}=v"))
             .collect::<Vec<_>>()
             .join(",");
-        assert!(matches!(
-            s.parse::<TraceState>(),
-            Err(TraceStateError::TooManyEntries)
-        ));
+        assert_eq!(
+            s.parse::<TraceState>().unwrap_err(),
+            TraceStateError::TooManyEntries
+        );
     }
 
     #[test]
@@ -430,10 +474,10 @@ mod tests {
         for i in 0..MAX_ENTRIES {
             state.insert(&format!("k{i}"), "v").unwrap();
         }
-        assert!(matches!(
-            state.insert("new", "v"),
-            Err(TraceStateError::TooManyEntries)
-        ));
+        assert_eq!(
+            state.insert("new", "v").unwrap_err(),
+            TraceStateError::TooManyEntries
+        );
     }
 
     #[test]
