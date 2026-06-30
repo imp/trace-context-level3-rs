@@ -299,9 +299,10 @@ fn build_trace_context<G: IdGenerator>(generator: &G, headers: &HeaderMap) -> Tr
 mod tests {
     use std::convert::Infallible;
 
-    use http::HeaderName;
     use http::HeaderValue;
     use tower::ServiceExt;
+    use trace_context_level3_http::TRACEPARENT;
+    use trace_context_level3_http::TRACESTATE;
 
     use super::*;
 
@@ -309,24 +310,22 @@ mod tests {
 
     async fn run<G: IdGenerator + Clone>(
         layer: TraceContextLayer<G>,
-        headers: &[(&str, &str)],
+        headers: &[(http::HeaderName, &str)],
     ) -> TraceContext {
         let svc = layer.layer(tower::service_fn(|req: Request<()>| async move {
             Ok::<_, Infallible>(req.extensions().get::<TraceContext>().cloned().unwrap())
         }));
         let mut req = Request::new(());
         for (name, value) in headers {
-            req.headers_mut().insert(
-                HeaderName::from_bytes(name.as_bytes()).unwrap(),
-                HeaderValue::from_str(value).unwrap(),
-            );
+            req.headers_mut()
+                .insert(name.clone(), HeaderValue::from_str(value).unwrap());
         }
         svc.oneshot(req).await.unwrap()
     }
 
     #[tokio::test]
     async fn advances_span_on_valid_traceparent() {
-        let ctx = run(TraceContextLayer::new(), &[("traceparent", VALID_TP)]).await;
+        let ctx = run(TraceContextLayer::new(), &[(TRACEPARENT, VALID_TP)]).await;
         let original: TraceParent = VALID_TP.parse().unwrap();
         assert_eq!(ctx.traceparent.trace_id, original.trace_id);
         assert_ne!(ctx.traceparent.parent_id, original.parent_id);
@@ -342,7 +341,7 @@ mod tests {
 
     #[tokio::test]
     async fn creates_root_span_on_invalid_traceparent() {
-        let ctx = run(TraceContextLayer::new(), &[("traceparent", "garbage")]).await;
+        let ctx = run(TraceContextLayer::new(), &[(TRACEPARENT, "garbage")]).await;
         assert!(ctx.traceparent.is_random_trace_id());
     }
 
@@ -350,7 +349,7 @@ mod tests {
     async fn preserves_tracestate() {
         let ctx = run(
             TraceContextLayer::new(),
-            &[("traceparent", VALID_TP), ("tracestate", "vendor=val")],
+            &[(TRACEPARENT, VALID_TP), (TRACESTATE, "vendor=val")],
         )
         .await;
         assert_eq!(ctx.tracestate.get("vendor"), Some("val"));
@@ -425,7 +424,7 @@ mod tests {
         });
         let headers = svc.oneshot(req).await.unwrap();
         let injected: TraceParent = headers
-            .get("traceparent")
+            .get(&TRACEPARENT)
             .unwrap()
             .to_str()
             .unwrap()
@@ -443,7 +442,7 @@ mod tests {
             Ok::<_, Infallible>(req.headers().clone())
         }));
         let headers = svc.oneshot(Request::new(())).await.unwrap();
-        assert!(headers.get("traceparent").is_none());
+        assert!(headers.get(&TRACEPARENT).is_none());
     }
 
     #[cfg(feature = "task-local")]
@@ -472,7 +471,7 @@ mod tests {
             )
             .await;
         let injected: TraceParent = headers
-            .get("traceparent")
+            .get(&TRACEPARENT)
             .unwrap()
             .to_str()
             .unwrap()

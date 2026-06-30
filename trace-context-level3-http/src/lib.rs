@@ -80,13 +80,10 @@ fn collect_tracestate(headers: &HeaderMap) -> TraceState {
 mod tests {
     use super::*;
 
-    fn header_map(pairs: &[(&str, &str)]) -> HeaderMap {
+    fn header_map(pairs: &[(HeaderName, &str)]) -> HeaderMap {
         let mut map = HeaderMap::new();
         for (name, value) in pairs {
-            map.insert(
-                HeaderName::from_bytes(name.as_bytes()).unwrap(),
-                HeaderValue::from_str(value).unwrap(),
-            );
+            map.insert(name.clone(), HeaderValue::from_str(value).unwrap());
         }
         map
     }
@@ -101,7 +98,7 @@ mod tests {
 
     #[test]
     fn extract_parses_traceparent() {
-        let headers = header_map(&[("traceparent", VALID_TP)]);
+        let headers = header_map(&[(TRACEPARENT, VALID_TP)]);
         let ctx = TraceContext::extract(&headers).unwrap().unwrap();
         assert!(ctx.traceparent.is_sampled());
         assert!(ctx.tracestate.is_empty());
@@ -109,13 +106,13 @@ mod tests {
 
     #[test]
     fn extract_returns_err_on_invalid_traceparent() {
-        let headers = header_map(&[("traceparent", "not-a-traceparent")]);
+        let headers = header_map(&[(TRACEPARENT, "not-a-traceparent")]);
         assert!(matches!(TraceContext::extract(&headers), Some(Err(_))));
     }
 
     #[test]
     fn extract_parses_tracestate() {
-        let headers = header_map(&[("traceparent", VALID_TP), ("tracestate", "vendor=value")]);
+        let headers = header_map(&[(TRACEPARENT, VALID_TP), (TRACESTATE, "vendor=value")]);
         let ctx = TraceContext::extract(&headers).unwrap().unwrap();
         assert_eq!(ctx.tracestate.get("vendor"), Some("value"));
     }
@@ -124,8 +121,8 @@ mod tests {
     fn extract_preserves_valid_entries_alongside_invalid() {
         // A bad entry should be silently dropped; the good one must survive.
         let headers = header_map(&[
-            ("traceparent", VALID_TP),
-            ("tracestate", "vendor=value,!!!bad!!!"),
+            (TRACEPARENT, VALID_TP),
+            (TRACESTATE, "vendor=value,!!!bad!!!"),
         ]);
         let ctx = TraceContext::extract(&headers).unwrap().unwrap();
         assert_eq!(ctx.tracestate.get("vendor"), Some("value"));
@@ -133,7 +130,7 @@ mod tests {
 
     #[test]
     fn extract_ignores_invalid_tracestate() {
-        let headers = header_map(&[("traceparent", VALID_TP), ("tracestate", "!!!invalid!!!")]);
+        let headers = header_map(&[(TRACEPARENT, VALID_TP), (TRACESTATE, "!!!invalid!!!")]);
         let ctx = TraceContext::extract(&headers).unwrap().unwrap();
         assert!(ctx.tracestate.is_empty());
     }
@@ -146,8 +143,8 @@ mod tests {
         };
         let mut headers = HeaderMap::new();
         ctx.inject(&mut headers);
-        assert_eq!(headers.get("traceparent").unwrap(), VALID_TP);
-        assert!(headers.get("tracestate").is_none());
+        assert_eq!(headers.get(&TRACEPARENT).unwrap(), VALID_TP);
+        assert!(headers.get(&TRACESTATE).is_none());
     }
 
     #[test]
@@ -161,20 +158,20 @@ mod tests {
         let mut headers = HeaderMap::new();
         ctx.inject(&mut headers);
         assert_eq!(
-            headers.get("tracestate").unwrap().to_str().unwrap(),
+            headers.get(&TRACESTATE).unwrap().to_str().unwrap(),
             "vendor=value"
         );
     }
 
     #[test]
     fn inject_removes_tracestate_when_empty() {
-        let mut headers = header_map(&[("tracestate", "vendor=old")]);
+        let mut headers = header_map(&[(TRACESTATE, "vendor=old")]);
         let ctx = TraceContext {
             traceparent: VALID_TP.parse().unwrap(),
             tracestate: TraceState::default(),
         };
         ctx.inject(&mut headers);
-        assert!(headers.get("tracestate").is_none());
+        assert!(headers.get(&TRACESTATE).is_none());
     }
 
     #[test]
