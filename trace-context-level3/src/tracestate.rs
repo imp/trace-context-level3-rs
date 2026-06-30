@@ -527,8 +527,8 @@ mod tests {
     #[test]
     fn rejects_duplicate_keys_in_strict_parse() {
         assert!(matches!(
-            "foo=a,foo=b".parse::<TraceState>(),
-            Err(TraceStateError::DuplicateKey(_))
+            "foo=a,foo=b".parse::<TraceState>().unwrap_err(),
+            TraceStateError::DuplicateKey(_)
         ));
     }
 
