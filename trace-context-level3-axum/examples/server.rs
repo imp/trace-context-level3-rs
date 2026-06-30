@@ -52,12 +52,12 @@ async fn show_context(ctx: TraceContext) -> String {
     };
     format!(
         "traceparent : {tp}\n  version   : {ver:02x}\n  trace-id  : {tid}\n  parent-id : {pid}\n  sampled   : {sampled}\ntracestate  : {ts}\n",
-        tp      = ctx.traceparent,
-        ver     = ctx.traceparent.version,
-        tid     = ctx.traceparent.trace_id,
-        pid     = ctx.traceparent.parent_id,
+        tp = ctx.traceparent,
+        ver = ctx.traceparent.version,
+        tid = ctx.traceparent.trace_id,
+        pid = ctx.traceparent.parent_id,
         sampled = ctx.traceparent.is_sampled(),
-        ts      = tracestate,
+        ts = tracestate,
     )
 }
 

@@ -130,16 +130,20 @@ TRACE_CONTEXT.with(|ctx| println!("{}", ctx.traceparent));
 
 ---
 
-## axum extractor — `trace-context-level3-axum`
+## axum extractors — `trace-context-level3-axum`
 
 ```toml
 [dependencies]
 trace-context-level3-axum = { git = "https://github.com/imp/trace-context-level3-rs" }
 ```
 
-`TraceContext` implements `FromRequestParts`. When `TraceContextLayer` is active it
-reads the already-advanced child span from request extensions (zero re-parsing).
-Without the middleware it falls back to extracting from raw headers.
+Two extractors are provided, both implementing `FromRequestParts`:
+
+### `TraceContext` — spec-compliant (recommended)
+
+When `traceparent` is absent or invalid a fresh root span is generated, matching
+the W3C spec's guidance ("receivers SHOULD start a new trace"). Handlers always
+receive a valid context and the extractor never rejects.
 
 ```rust
 use axum::{Router, routing::get};
@@ -155,8 +159,26 @@ let app = Router::new()
     .layer(TraceContextLayer::new());
 ```
 
-If `traceparent` is missing or invalid the extractor rejects the request with
-`400 Bad Request`.
+### `StrictTraceContext` — policy override
+
+Rejects with `400 Bad Request` when `traceparent` is absent or invalid. Use this
+when your service must refuse requests that don't carry an upstream trace.
+
+```rust
+use trace_context_level3_axum::StrictTraceContext;
+
+async fn strict_handler(ctx: StrictTraceContext) -> String {
+    ctx.traceparent.to_string()
+}
+```
+
+Use `Option<StrictTraceContext>` to distinguish "context was propagated" from "was
+not" without rejecting the request — axum's blanket impl converts any rejection to
+`None`.
+
+Both extractors check request extensions first: when `TraceContextLayer` is active
+it stores the already-advanced child span there, so neither extractor re-parses
+the raw headers.
 
 ---
 

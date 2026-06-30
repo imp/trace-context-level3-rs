@@ -13,7 +13,7 @@ readme.workspace = true
 [dependencies]
 axum-core.workspace = true
 http.workspace = true
-trace-context-level3.workspace = true
+trace-context-level3 = { workspace = true, features = ["rand"] }
 trace-context-level3-http.workspace = true
 
 
