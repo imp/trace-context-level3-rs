@@ -346,6 +346,25 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn restarts_trace_on_multiple_traceparent_headers() {
+        let original: TraceParent = VALID_TP.parse().unwrap();
+        let layer = TraceContextLayer::new();
+        let svc = layer.layer(tower::service_fn(|req: Request<()>| async move {
+            Ok::<_, Infallible>(req.extensions().get::<TraceContext>().cloned().unwrap())
+        }));
+        let mut req = Request::new(());
+        req.headers_mut()
+            .insert(TRACEPARENT, HeaderValue::from_static(VALID_TP));
+        req.headers_mut().append(
+            TRACEPARENT,
+            HeaderValue::from_static("00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00"),
+        );
+        let ctx = svc.oneshot(req).await.unwrap();
+        // Must have started a fresh trace, not continued the upstream one.
+        assert_ne!(ctx.traceparent.trace_id, original.trace_id);
+    }
+
+    #[tokio::test]
     async fn preserves_tracestate() {
         let ctx = run(
             TraceContextLayer::new(),

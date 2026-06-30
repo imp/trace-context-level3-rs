@@ -29,6 +29,10 @@ pub enum TraceParentError {
     /// For version `00` the header must be exactly 55 characters.
     #[error("traceparent version 00 must be exactly 55 characters, got {0}")]
     TrailingData(usize),
+
+    /// Multiple `traceparent` headers were received; the spec requires restarting the trace.
+    #[error("multiple traceparent headers received; trace must be restarted")]
+    MultipleValues,
 }
 
 /// Errors from parsing or mutating a [`TraceState`][crate::TraceState].

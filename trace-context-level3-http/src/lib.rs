@@ -32,8 +32,12 @@ impl TraceContext {
     /// A missing or malformed `tracestate` is treated leniently as empty,
     /// per the spec's guidance for intermediaries.
     pub fn extract(headers: &HeaderMap) -> Option<Result<Self, TraceParentError>> {
-        let traceparent = headers.get(&TRACEPARENT)?.to_str().ok()?;
-        let traceparent = match traceparent.parse::<TraceParent>() {
+        let mut tp_values = headers.get_all(&TRACEPARENT).iter();
+        let first = tp_values.next()?;
+        if tp_values.next().is_some() {
+            return Some(Err(TraceParentError::MultipleValues));
+        }
+        let traceparent = match first.to_str().ok()?.parse::<TraceParent>() {
             Ok(tp) => tp,
             Err(e) => return Some(Err(e)),
         };
@@ -53,11 +57,13 @@ impl TraceContext {
             .expect("traceparent is always valid ASCII");
         headers.insert(TRACEPARENT.clone(), traceparent);
 
-        if self.tracestate.is_empty() {
+        let mut ts = self.tracestate.clone();
+        ts.truncate(512);
+        if ts.is_empty() {
             headers.remove(&TRACESTATE);
         } else {
-            let tracestate = HeaderValue::from_str(&self.tracestate.to_string())
-                .expect("tracestate is always valid ASCII");
+            let tracestate =
+                HeaderValue::from_str(&ts.to_string()).expect("tracestate is always valid ASCII");
             headers.insert(TRACESTATE.clone(), tracestate);
         }
     }
@@ -188,5 +194,52 @@ mod tests {
         original.inject(&mut headers);
         let recovered = TraceContext::extract(&headers).unwrap().unwrap();
         assert_eq!(recovered, original);
+    }
+
+    #[test]
+    fn extract_errors_on_multiple_traceparent_headers() {
+        use http::HeaderValue;
+        use trace_context_level3::TraceParentError;
+        let mut headers = HeaderMap::new();
+        headers.insert(TRACEPARENT, HeaderValue::from_static(VALID_TP));
+        // append adds a second value for the same header name
+        headers.append(
+            TRACEPARENT,
+            HeaderValue::from_static("00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00"),
+        );
+        assert!(matches!(
+            TraceContext::extract(&headers),
+            Some(Err(TraceParentError::MultipleValues))
+        ));
+    }
+
+    #[test]
+    fn inject_truncates_oversized_tracestate() {
+        // Build a tracestate whose serialised form exceeds 512 bytes.
+        // Each entry is "v{i}={pad}" = key 2 chars + '=' + value up to 128 = 131 chars + comma.
+        // 5 entries × 103 chars each = 515 serialised bytes.
+        let mut ts = TraceState::default();
+        // Insert 5 entries with ~103-char values so total > 512 (they get prepended).
+        for i in 0..5_u8 {
+            let key = format!("v{i}");
+            let value = "x".repeat(100);
+            ts.insert(&key, &value).unwrap();
+        }
+        // Sanity: raw serialised length exceeds 512.
+        assert!(ts.to_string().len() > 512);
+
+        let ctx = TraceContext {
+            traceparent: VALID_TP.parse().unwrap(),
+            tracestate: ts,
+        };
+        let mut headers = HeaderMap::new();
+        ctx.inject(&mut headers);
+
+        let written = headers.get(&TRACESTATE).unwrap().to_str().unwrap();
+        assert!(
+            written.len() <= 512,
+            "injected tracestate length {} exceeds 512",
+            written.len()
+        );
     }
 }
