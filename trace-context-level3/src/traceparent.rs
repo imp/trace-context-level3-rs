@@ -532,10 +532,10 @@ mod tests {
     #[test]
     fn rejects_uppercase_hex() {
         let s = "00-4BF92F3577B34DA6A3CE929D0E0E4736-00f067aa0ba902b7-01";
-        assert!(matches!(
-            s.parse::<TraceParent>(),
-            Err(TraceParentError::InvalidHex)
-        ));
+        assert_eq!(
+            s.parse::<TraceParent>().unwrap_err(),
+            TraceParentError::InvalidHex
+        );
     }
 
     #[test]
@@ -560,8 +560,8 @@ mod tests {
     fn rejects_trailing_data_for_v00() {
         let s = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01-extra";
         assert!(matches!(
-            s.parse::<TraceParent>(),
-            Err(TraceParentError::TrailingData(_))
+            s.parse::<TraceParent>().unwrap_err(),
+            TraceParentError::TrailingData(_)
         ));
     }
 
