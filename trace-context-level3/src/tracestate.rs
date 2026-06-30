@@ -113,9 +113,22 @@ impl TraceState {
     /// is kept and later occurrences are dropped. At most 32 entries are kept.
     #[must_use]
     pub fn parse_lenient(s: &str) -> Self {
+        Self::parse_lenient_many(std::iter::once(s))
+    }
+
+    /// Parses multiple `tracestate` header values leniently, as if they were
+    /// joined by commas. Avoids allocating an intermediate string when the
+    /// caller already holds an iterator of header values.
+    ///
+    /// The same lenient rules as [`parse_lenient`](Self::parse_lenient) apply
+    /// across all values: invalid entries are dropped, the first occurrence of
+    /// a duplicate key wins, and at most 32 entries are kept in total.
+    #[must_use]
+    pub fn parse_lenient_many<'a>(values: impl IntoIterator<Item = &'a str>) -> Self {
         let mut seen = std::collections::HashSet::new();
-        let entries = s
-            .split(',')
+        let entries = values
+            .into_iter()
+            .flat_map(|v| v.split(','))
             .filter_map(|item| Self::validate_item(item.trim_matches([' ', '\t'])).ok())
             .filter(|&(key, _)| seen.insert(key))
             .take(MAX_ENTRIES)

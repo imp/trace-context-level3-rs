@@ -32,17 +32,17 @@ impl TraceContext {
     /// A missing or malformed `tracestate` is treated leniently as empty,
     /// per the spec's guidance for intermediaries.
     pub fn extract(headers: &HeaderMap) -> Result<Option<Self>, TraceParentError> {
-        let mut tp_values = headers.get_all(&TRACEPARENT).iter();
-        let Some(first) = tp_values.next() else {
+        let mut traceparents = headers.get_all(&TRACEPARENT).iter();
+        let Some(first) = traceparents.next() else {
             return Ok(None);
         };
-        if tp_values.next().is_some() {
+        if traceparents.next().is_some() {
             return Err(TraceParentError::MultipleValues);
         }
-        let Some(tp_str) = first.to_str().ok() else {
+        let Some(traceparent) = first.to_str().ok() else {
             return Ok(None);
         };
-        let traceparent = tp_str.parse::<TraceParent>()?;
+        let traceparent = traceparent.parse()?;
         let tracestate = collect_tracestate(headers);
         Ok(Some(Self {
             traceparent,
@@ -75,13 +75,11 @@ impl TraceContext {
 /// as required when multiple `tracestate` headers are present.
 /// Falls back to an empty `TraceState` if the combined value cannot be parsed.
 fn collect_tracestate(headers: &HeaderMap) -> TraceState {
-    let combined = headers
+    let values = headers
         .get_all(&TRACESTATE)
         .iter()
-        .filter_map(|v| v.to_str().ok())
-        .collect::<Vec<_>>()
-        .join(",");
-    TraceState::parse_lenient(&combined)
+        .filter_map(|v| v.to_str().ok());
+    TraceState::parse_lenient_many(values)
 }
 
 #[cfg(test)]
