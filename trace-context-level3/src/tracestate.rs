@@ -583,6 +583,34 @@ mod tests {
         assert!(TraceState::parse_lenient("").is_empty());
     }
 
+    // --- parse_lenient_many ---
+
+    #[test]
+    fn parse_lenient_many_merges_multiple_header_values() {
+        // Simulates two separate tracestate header lines received from a proxy.
+        let state = TraceState::parse_lenient_many(["vendor=v1,other=v2", "third=v3"]);
+        assert_eq!(state.get("vendor"), Some("v1"));
+        assert_eq!(state.get("other"), Some("v2"));
+        assert_eq!(state.get("third"), Some("v3"));
+        assert_eq!(state.len(), 3);
+    }
+
+    #[test]
+    fn parse_lenient_many_first_occurrence_wins_across_headers() {
+        // "foo" appears in the first header and again in the second; first wins.
+        let state = TraceState::parse_lenient_many(["foo=first,bar=x", "foo=second"]);
+        assert_eq!(state.get("foo"), Some("first"));
+        assert_eq!(state.len(), 2);
+    }
+
+    #[test]
+    fn parse_lenient_many_drops_invalid_entries_across_headers() {
+        let state = TraceState::parse_lenient_many(["valid=ok,!!!bad!!!=v", "other=2"]);
+        assert_eq!(state.get("valid"), Some("ok"));
+        assert_eq!(state.get("other"), Some("2"));
+        assert_eq!(state.len(), 2);
+    }
+
     // --- truncate ---
 
     #[test]
