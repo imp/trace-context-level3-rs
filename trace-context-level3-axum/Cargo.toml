@@ -19,7 +19,7 @@ trace-context-level3-http.workspace = true
 
 [dev-dependencies]
 axum = { workspace = true, features = ["http1", "tokio"] }
-tokio = { workspace = true, features = ["macros", "rt"] }
+tokio = { workspace = true, features = ["macros", "net", "rt"] }
 tower = { workspace = true, features = ["util"] }
 trace-context-level3-http.workspace = true
 trace-context-level3-tower.workspace = true
