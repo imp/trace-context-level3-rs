@@ -273,7 +273,7 @@ fn current_trace_context<B>(req: &Request<B>) -> Option<TraceContext> {
 
 fn build_trace_context<G: IdGenerator>(generator: &G, headers: &HeaderMap) -> TraceContext {
     match TraceContext::extract(headers) {
-        Some(Ok(ctx)) => TraceContext {
+        Ok(Some(ctx)) => TraceContext {
             traceparent: ctx.traceparent.child(generator.new_parent_id()),
             tracestate: ctx.tracestate,
         },

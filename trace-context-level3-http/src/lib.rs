@@ -27,22 +27,24 @@ pub struct TraceContext {
 impl TraceContext {
     /// Extracts the trace context from HTTP headers.
     ///
-    /// Returns `None` if no `traceparent` header is present.
-    /// Returns `Some(Err(_))` if `traceparent` is present but malformed.
+    /// Returns `Ok(None)` if no `traceparent` header is present.
+    /// Returns `Err(_)` if `traceparent` is present but malformed.
     /// A missing or malformed `tracestate` is treated leniently as empty,
     /// per the spec's guidance for intermediaries.
-    pub fn extract(headers: &HeaderMap) -> Option<Result<Self, TraceParentError>> {
+    pub fn extract(headers: &HeaderMap) -> Result<Option<Self>, TraceParentError> {
         let mut tp_values = headers.get_all(&TRACEPARENT).iter();
-        let first = tp_values.next()?;
-        if tp_values.next().is_some() {
-            return Some(Err(TraceParentError::MultipleValues));
-        }
-        let traceparent = match first.to_str().ok()?.parse::<TraceParent>() {
-            Ok(tp) => tp,
-            Err(e) => return Some(Err(e)),
+        let Some(first) = tp_values.next() else {
+            return Ok(None);
         };
+        if tp_values.next().is_some() {
+            return Err(TraceParentError::MultipleValues);
+        }
+        let Some(tp_str) = first.to_str().ok() else {
+            return Ok(None);
+        };
+        let traceparent = tp_str.parse::<TraceParent>()?;
         let tracestate = collect_tracestate(headers);
-        Some(Ok(Self {
+        Ok(Some(Self {
             traceparent,
             tracestate,
         }))
@@ -99,7 +101,7 @@ mod tests {
     #[test]
     fn extract_returns_none_with_no_traceparent() {
         let headers = HeaderMap::new();
-        assert!(TraceContext::extract(&headers).is_none());
+        assert_eq!(TraceContext::extract(&headers).unwrap(), None);
     }
 
     #[test]
@@ -113,7 +115,7 @@ mod tests {
     #[test]
     fn extract_returns_err_on_invalid_traceparent() {
         let headers = header_map(&[(TRACEPARENT, "not-a-traceparent")]);
-        assert!(matches!(TraceContext::extract(&headers), Some(Err(_))));
+        assert!(TraceContext::extract(&headers).is_err());
     }
 
     #[test]
@@ -207,10 +209,8 @@ mod tests {
             TRACEPARENT,
             HeaderValue::from_static("00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00"),
         );
-        assert!(matches!(
-            TraceContext::extract(&headers),
-            Some(Err(TraceParentError::MultipleValues))
-        ));
+        let err = TraceContext::extract(&headers).unwrap_err();
+        assert_eq!(err, TraceParentError::MultipleValues);
     }
 
     #[test]
