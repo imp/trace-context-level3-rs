@@ -125,15 +125,17 @@ impl TraceState {
         Self(entries)
     }
 
+    /// Returns the byte length of the serialised header value (`key=value`
+    /// pairs joined by `,`), matching what [`Display`] would produce.
     fn encoded_len(&self) -> usize {
         if self.0.is_empty() {
             return 0;
         }
         self.0
             .iter()
-            .map(|(k, v)| k.len() + 1 + v.len())
+            .map(|(k, v)| k.len() + 1 + v.len()) // +1 for '='
             .sum::<usize>()
-            + (self.0.len() - 1)
+            + (self.0.len() - 1) // n-1 ',' separators between entries
     }
 }
 
@@ -153,31 +155,31 @@ impl str::FromStr for TraceState {
     type Err = TraceStateError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let mut entries: Vec<(String, String)> = Vec::new();
-        for member in s.split(',') {
-            // OWS = optional whitespace (SP / HTAB) per RFC 9110
-            let member = member.trim_matches(|c| c == ' ' || c == '\t');
-            if member.is_empty() {
-                continue; // OWS-only member; valid but carries no data
-            }
-            let eq = member
-                .find('=')
-                .ok_or_else(|| TraceStateError::InvalidKey(member.to_owned()))?;
-            let key = &member[..eq];
-            let value = &member[eq + 1..];
-            if !is_valid_key(key) {
-                return Err(TraceStateError::InvalidKey(key.to_owned()));
-            }
-            if !is_valid_value(value) {
-                return Err(TraceStateError::InvalidValue(value.to_owned()));
-            }
-            if entries.iter().any(|(k, _)| k == key) {
-                return Err(TraceStateError::DuplicateKey(key.to_owned()));
-            }
-            if entries.len() >= MAX_ENTRIES {
-                return Err(TraceStateError::TooManyEntries);
-            }
-            entries.push((key.to_owned(), value.to_owned()));
+        let mut seen = std::collections::HashSet::new();
+        let entries = s
+            .split(',')
+            .filter_map(|m| {
+                let m = m.trim_matches(|c| c == ' ' || c == '\t');
+                (!m.is_empty()).then_some(m)
+            })
+            .map(|member| {
+                let (key, value) = member
+                    .split_once('=')
+                    .ok_or_else(|| TraceStateError::InvalidKey(member.to_owned()))?;
+                if !is_valid_key(key) {
+                    return Err(TraceStateError::InvalidKey(key.to_owned()));
+                }
+                if !is_valid_value(value) {
+                    return Err(TraceStateError::InvalidValue(value.to_owned()));
+                }
+                if !seen.insert(key) {
+                    return Err(TraceStateError::DuplicateKey(key.to_owned()));
+                }
+                Ok((key.to_owned(), value.to_owned()))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        if entries.len() > MAX_ENTRIES {
+            return Err(TraceStateError::TooManyEntries);
         }
         Ok(Self(entries))
     }
@@ -192,10 +194,10 @@ impl str::FromStr for TraceState {
 ///
 /// `keychar = lcalpha / DIGIT / "_" / "-" / "*" / "/"` — note: no `@`
 fn is_valid_key(key: &str) -> bool {
-    match key.find('@') {
+    match key.split_once('@') {
         None => is_valid_simple_key(key),
-        Some(at) if key[at + 1..].contains('@') => false,
-        Some(at) => is_valid_tenant_id(&key[..at]) && is_valid_system_id(&key[at + 1..]),
+        Some((_, system)) if system.contains('@') => false,
+        Some((tenant, system)) => is_valid_tenant_id(tenant) && is_valid_system_id(system),
     }
 }
 
