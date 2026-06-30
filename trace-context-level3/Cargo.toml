@@ -12,11 +12,17 @@ readme.workspace = true
 
 [features]
 rand = ["dep:rand"]
+serde = ["dep:serde"]
 
 
 [dependencies]
 rand = { workspace = true, optional = true }
+serde = { workspace = true, optional = true }
 thiserror.workspace = true
+
+
+[dev-dependencies]
+serde_json = { workspace = true }
 
 
 [lints]

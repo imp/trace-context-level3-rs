@@ -266,6 +266,42 @@ fn is_nblk_chr(b: u8) -> bool {
     matches!(b, 0x21..=0x2B | 0x2D..=0x3C | 0x3E..=0x7E)
 }
 
+#[cfg(feature = "serde")]
+mod serde_impl {
+    use std::fmt;
+
+    use serde::Deserialize;
+    use serde::Deserializer;
+    use serde::Serialize;
+    use serde::Serializer;
+    use serde::de;
+    use serde::de::Visitor;
+
+    use super::TraceState;
+
+    impl Serialize for TraceState {
+        fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+            s.serialize_str(&self.to_string())
+        }
+    }
+
+    impl<'de> Deserialize<'de> for TraceState {
+        fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+            struct V;
+            impl<'de> Visitor<'de> for V {
+                type Value = TraceState;
+                fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                    f.write_str("a tracestate string, e.g. \"vendorname=opaquevalue,other=data\"")
+                }
+                fn visit_str<E: de::Error>(self, s: &str) -> Result<Self::Value, E> {
+                    s.parse().map_err(E::custom)
+                }
+            }
+            d.deserialize_str(V)
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -682,5 +718,42 @@ mod tests {
         assert_eq!(state.get("big"), None); // removed by step 1
         assert_eq!(state.get("a"), None); // oldest entry, removed by step 2
         assert_eq!(state.get("b"), Some("2")); // newest remaining, kept
+    }
+
+    #[cfg(feature = "serde")]
+    mod serde_tests {
+        use super::*;
+
+        #[test]
+        fn empty_roundtrip() {
+            let state = TraceState::default();
+            let json = serde_json::to_string(&state).unwrap();
+            assert_eq!(json, r#""""#);
+            let back: TraceState = serde_json::from_str(&json).unwrap();
+            assert!(back.is_empty());
+        }
+
+        #[test]
+        fn single_entry_roundtrip() {
+            let state: TraceState = "vendor=value".parse().unwrap();
+            let json = serde_json::to_string(&state).unwrap();
+            assert_eq!(json, r#""vendor=value""#);
+            let back: TraceState = serde_json::from_str(&json).unwrap();
+            assert_eq!(back.get("vendor"), Some("value"));
+        }
+
+        #[test]
+        fn multi_entry_roundtrip() {
+            let state: TraceState = "foo=bar,baz=qux".parse().unwrap();
+            let json = serde_json::to_string(&state).unwrap();
+            let back: TraceState = serde_json::from_str(&json).unwrap();
+            assert_eq!(back, state);
+        }
+
+        #[test]
+        fn deserialize_error_on_invalid() {
+            let err = serde_json::from_str::<TraceState>(r#""!!!invalid!!!""#);
+            assert!(err.is_err());
+        }
     }
 }

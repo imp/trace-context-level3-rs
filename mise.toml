@@ -26,9 +26,13 @@ run = "cargo test --workspace --features trace-context-level3/rand"
 description = "Run tests with task-local feature enabled"
 run = "cargo test --workspace --features trace-context-level3-tower/task-local"
 
+[tasks.test-serde]
+description = "Run tests with serde feature enabled"
+run = "cargo test --workspace --features trace-context-level3/serde,trace-context-level3-http/serde"
+
 [tasks.test-all]
 description = "Run tests across all feature combinations"
-depends = ["test", "test-rand", "test-task-local"]
+depends = ["test", "test-rand", "test-task-local", "test-serde"]
 
 [tasks.clean]
 description = "Remove build artifacts"

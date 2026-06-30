@@ -42,10 +42,25 @@ state.insert("myvendor", "data").unwrap();
 assert_eq!(state.to_string(), "myvendor=data,vendorname=opaquevalue");
 ```
 
-Random ID generation requires the `rand` feature (enabled by default):
+Random ID generation requires the `rand` feature:
 
 ```toml
 trace-context-level3 = { ..., features = ["rand"] }
+```
+
+`serde` support (`Serialize`/`Deserialize` for all public types) is available as an optional feature:
+
+```toml
+trace-context-level3 = { ..., features = ["serde"] }
+```
+
+Types serialize as their canonical wire-format strings (`TraceParent`, `TraceState`, `TraceId`, `ParentId`) or as a plain `u8` (`TraceFlags`). `TraceContext` in `trace-context-level3-http` (enabled with `trace-context-level3-http/serde`) serializes as a struct with `"traceparent"` and `"tracestate"` string fields:
+
+```json
+{
+  "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+  "tracestate": "vendor=value"
+}
 ```
 
 ---
@@ -253,6 +268,7 @@ Runs `fmt-check`, `clippy`, `test`, and feature-variant tests in parallel.
 - `RANDOM_TRACE_ID` flag (`0x02`) set on freshly generated root spans
 - Multiple `traceparent` headers → `TraceParentError::MultipleValues`
 - Response propagation via `Server-Timing: trace;desc=<traceparent>` (Level 3)
+- Optional `serde` feature: `Serialize`/`Deserialize` for all public types
 
 ---
 

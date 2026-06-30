@@ -10,9 +10,18 @@ keywords.workspace = true
 readme.workspace = true
 
 
+[features]
+serde = ["dep:serde", "trace-context-level3/serde"]
+
+
 [dependencies]
-trace-context-level3.workspace = true
 http.workspace = true
+serde = { workspace = true, optional = true, features = ["derive"] }
+trace-context-level3.workspace = true
+
+
+[dev-dependencies]
+serde_json = { workspace = true }
 
 
 [lints]

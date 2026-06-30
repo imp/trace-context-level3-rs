@@ -480,6 +480,104 @@ fn hex_nibble(b: u8) -> Result<u8, TraceParentError> {
     }
 }
 
+#[cfg(feature = "serde")]
+mod serde_impl {
+    use std::fmt;
+
+    use serde::Deserialize;
+    use serde::Deserializer;
+    use serde::Serialize;
+    use serde::Serializer;
+    use serde::de;
+    use serde::de::Visitor;
+
+    use super::ParentId;
+    use super::TraceFlags;
+    use super::TraceId;
+    use super::TraceParent;
+
+    impl Serialize for TraceId {
+        fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+            s.serialize_str(&format!("{self:x}"))
+        }
+    }
+
+    impl<'de> Deserialize<'de> for TraceId {
+        fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+            struct V;
+            impl<'de> Visitor<'de> for V {
+                type Value = TraceId;
+                fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                    f.write_str("a 32-character lowercase hex string")
+                }
+                fn visit_str<E: de::Error>(self, s: &str) -> Result<Self::Value, E> {
+                    s.parse().map_err(E::custom)
+                }
+            }
+            d.deserialize_str(V)
+        }
+    }
+
+    impl Serialize for ParentId {
+        fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+            s.serialize_str(&format!("{self:x}"))
+        }
+    }
+
+    impl<'de> Deserialize<'de> for ParentId {
+        fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+            struct V;
+            impl<'de> Visitor<'de> for V {
+                type Value = ParentId;
+                fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                    f.write_str("a 16-character lowercase hex string")
+                }
+                fn visit_str<E: de::Error>(self, s: &str) -> Result<Self::Value, E> {
+                    s.parse().map_err(E::custom)
+                }
+            }
+            d.deserialize_str(V)
+        }
+    }
+
+    impl Serialize for TraceFlags {
+        fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+            s.serialize_u8(self.0)
+        }
+    }
+
+    impl<'de> Deserialize<'de> for TraceFlags {
+        fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+            Ok(Self(u8::deserialize(d)?))
+        }
+    }
+
+    impl Serialize for TraceParent {
+        fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+            s.serialize_str(&self.to_string())
+        }
+    }
+
+    impl<'de> Deserialize<'de> for TraceParent {
+        fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+            struct V;
+            impl<'de> Visitor<'de> for V {
+                type Value = TraceParent;
+                fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                    f.write_str(
+                        "a traceparent string, e.g. \
+                         \"00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01\"",
+                    )
+                }
+                fn visit_str<E: de::Error>(self, s: &str) -> Result<Self::Value, E> {
+                    s.parse().map_err(E::custom)
+                }
+            }
+            d.deserialize_str(V)
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -740,5 +838,52 @@ mod tests {
     fn parent_id_from_str() {
         let id: ParentId = "00f067aa0ba902b7".parse().unwrap();
         assert_eq!(id.to_string(), "00f067aa0ba902b7");
+    }
+
+    #[cfg(feature = "serde")]
+    mod serde_tests {
+        use super::*;
+
+        #[test]
+        fn trace_id_roundtrip() {
+            let id: TraceId = "4bf92f3577b34da6a3ce929d0e0e4736".parse().unwrap();
+            let json = serde_json::to_string(&id).unwrap();
+            assert_eq!(json, r#""4bf92f3577b34da6a3ce929d0e0e4736""#);
+            let back: TraceId = serde_json::from_str(&json).unwrap();
+            assert_eq!(back, id);
+        }
+
+        #[test]
+        fn parent_id_roundtrip() {
+            let id: ParentId = "00f067aa0ba902b7".parse().unwrap();
+            let json = serde_json::to_string(&id).unwrap();
+            assert_eq!(json, r#""00f067aa0ba902b7""#);
+            let back: ParentId = serde_json::from_str(&json).unwrap();
+            assert_eq!(back, id);
+        }
+
+        #[test]
+        fn trace_flags_roundtrip() {
+            let flags = TraceFlags::SAMPLED;
+            let json = serde_json::to_string(&flags).unwrap();
+            assert_eq!(json, "1");
+            let back: TraceFlags = serde_json::from_str(&json).unwrap();
+            assert_eq!(back, flags);
+        }
+
+        #[test]
+        fn trace_parent_roundtrip() {
+            let tp: TraceParent = VALID.parse().unwrap();
+            let json = serde_json::to_string(&tp).unwrap();
+            assert_eq!(json, format!(r#""{VALID}""#));
+            let back: TraceParent = serde_json::from_str(&json).unwrap();
+            assert_eq!(back, tp);
+        }
+
+        #[test]
+        fn trace_parent_deserialize_error_on_invalid() {
+            let err = serde_json::from_str::<TraceParent>(r#""not-a-traceparent""#);
+            assert!(err.is_err());
+        }
     }
 }

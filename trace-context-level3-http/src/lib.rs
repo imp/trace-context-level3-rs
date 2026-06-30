@@ -28,6 +28,7 @@ pub const SERVER_TIMING: HeaderName = HeaderName::from_static("server-timing");
 /// The trace context extracted from HTTP headers: `traceparent` and
 /// `tracestate` treated as a single propagation unit.
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct TraceContext {
     pub traceparent: TraceParent,
     pub tracestate: TraceState,
@@ -391,6 +392,49 @@ mod tests {
         let mut headers = HeaderMap::new();
         inject_server_timing(&tp, &mut headers);
         assert_eq!(extract_server_timing(&headers).unwrap(), tp);
+    }
+
+    #[cfg(feature = "serde")]
+    mod serde_tests {
+        use super::*;
+
+        const VALID_TP: &str = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01";
+
+        #[test]
+        fn trace_context_roundtrip_json() {
+            let ctx = TraceContext {
+                traceparent: VALID_TP.parse().unwrap(),
+                tracestate: "vendor=value".parse().unwrap(),
+            };
+            let json = serde_json::to_string(&ctx).unwrap();
+            assert!(json.contains(VALID_TP));
+            assert!(json.contains("vendor=value"));
+            let back: TraceContext = serde_json::from_str(&json).unwrap();
+            assert_eq!(back, ctx);
+        }
+
+        #[test]
+        fn trace_context_empty_tracestate_roundtrip() {
+            let ctx = TraceContext {
+                traceparent: VALID_TP.parse().unwrap(),
+                tracestate: TraceState::default(),
+            };
+            let json = serde_json::to_string(&ctx).unwrap();
+            let back: TraceContext = serde_json::from_str(&json).unwrap();
+            assert_eq!(back, ctx);
+            assert!(back.tracestate.is_empty());
+        }
+
+        #[test]
+        fn trace_context_json_shape() {
+            let ctx = TraceContext {
+                traceparent: VALID_TP.parse().unwrap(),
+                tracestate: TraceState::default(),
+            };
+            let v: serde_json::Value = serde_json::to_value(&ctx).unwrap();
+            assert_eq!(v["traceparent"], serde_json::Value::String(VALID_TP.into()));
+            assert_eq!(v["tracestate"], serde_json::Value::String(String::new()));
+        }
     }
 
     #[test]
