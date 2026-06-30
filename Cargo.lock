@@ -476,6 +476,7 @@ dependencies = [
  "tower",
  "trace-context-level3",
  "trace-context-level3-http",
+ "trace-context-level3-tower",
 ]
 
 [[package]]
