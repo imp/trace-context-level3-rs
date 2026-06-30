@@ -554,7 +554,7 @@ mod tests {
             .layer(TraceContextLayer::new())
             .layer(TraceResponseLayer::new())
             .service(tower::service_fn(|_req: Request<()>| async move {
-                Ok::<_, Infallible>(http::Response::new(()))
+                Ok::<_, Infallible>(Response::new(()))
             }));
 
         let req = Request::builder()
@@ -578,7 +578,7 @@ mod tests {
             .layer(TraceContextLayer::new())
             .layer(TraceResponseLayer::new())
             .service(tower::service_fn(|_req: Request<()>| async move {
-                Ok::<_, Infallible>(http::Response::new(()))
+                Ok::<_, Infallible>(Response::new(()))
             }));
 
         // No incoming traceparent — middleware creates a root span.
@@ -596,9 +596,9 @@ mod tests {
             .layer(TraceContextLayer::new())
             .layer(TraceResponseLayer::new())
             .service(tower::service_fn(|_req: Request<()>| async move {
-                let mut resp = http::Response::new(());
+                let mut resp = Response::new(());
                 resp.headers_mut()
-                    .insert(SERVER_TIMING, http::HeaderValue::from_static("db;dur=53"));
+                    .insert(SERVER_TIMING, HeaderValue::from_static("db;dur=53"));
                 Ok::<_, Infallible>(resp)
             }));
 
@@ -611,7 +611,7 @@ mod tests {
             .collect();
         assert_eq!(values.len(), 2, "must have original + trace metric");
         assert!(values.iter().any(|v| v.starts_with("trace;desc=")));
-        assert!(values.iter().any(|v| *v == "db;dur=53"));
+        assert!(values.contains(&"db;dur=53"));
     }
 
     #[tokio::test]
@@ -622,7 +622,7 @@ mod tests {
         let svc = ServiceBuilder::new()
             .layer(TraceResponseLayer::new())
             .service(tower::service_fn(|_req: Request<()>| async move {
-                Ok::<_, Infallible>(http::Response::new(()))
+                Ok::<_, Infallible>(Response::new(()))
             }));
 
         let resp = svc.oneshot(Request::new(())).await.unwrap();
