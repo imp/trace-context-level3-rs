@@ -113,28 +113,15 @@ impl TraceState {
     /// is kept and later occurrences are dropped. At most 32 entries are kept.
     #[must_use]
     pub fn parse_lenient(s: &str) -> Self {
-        let mut entries: Vec<(String, String)> = Vec::new();
-        for member in s.split(',') {
-            let member = member.trim_matches(|c| c == ' ' || c == '\t');
-            if member.is_empty() {
-                continue;
-            }
-            let Some(eq) = member.find('=') else {
-                continue;
-            };
-            let key = &member[..eq];
-            let value = &member[eq + 1..];
-            if !is_valid_key(key) || !is_valid_value(value) {
-                continue;
-            }
-            if entries.iter().any(|(k, _)| k == key) {
-                continue; // first occurrence wins
-            }
-            if entries.len() >= MAX_ENTRIES {
-                break;
-            }
-            entries.push((key.to_owned(), value.to_owned()));
-        }
+        let mut seen = std::collections::HashSet::new();
+        let entries = s
+            .split(',')
+            .filter_map(|item| item.trim_matches(|c| c == ' ' || c == '\t').split_once('='))
+            .filter(|(key, value)| is_valid_key(key) && is_valid_value(value))
+            .filter(|&(key, _)| seen.insert(key))
+            .take(MAX_ENTRIES)
+            .map(|(key, value)| (key.to_owned(), value.to_owned()))
+            .collect();
         Self(entries)
     }
 
