@@ -28,7 +28,6 @@ pub const SERVER_TIMING: HeaderName = HeaderName::from_static("server-timing");
 /// The trace context extracted from HTTP headers: `traceparent` and
 /// `tracestate` treated as a single propagation unit.
 #[derive(Clone, Debug, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct TraceContext {
     pub traceparent: TraceParent,
     pub tracestate: TraceState,
@@ -166,6 +165,140 @@ fn collect_tracestate(headers: &HeaderMap) -> TraceState {
         .iter()
         .filter_map(|v| v.to_str().ok());
     TraceState::parse_lenient_many(values)
+}
+
+#[cfg(feature = "serde")]
+mod serde {
+    use std::fmt;
+
+    use serde_core::Deserialize;
+    use serde_core::Deserializer;
+    use serde_core::Serialize;
+    use serde_core::Serializer;
+    use serde_core::de;
+    use serde_core::de::MapAccess;
+    use serde_core::de::Visitor;
+    use serde_core::ser::SerializeStruct;
+
+    use super::TraceContext;
+
+    impl Serialize for TraceContext {
+        fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+            let mut state = s.serialize_struct("TraceContext", 2)?;
+            state.serialize_field("traceparent", &self.traceparent)?;
+            state.serialize_field("tracestate", &self.tracestate)?;
+            state.end()
+        }
+    }
+
+    impl<'de> Deserialize<'de> for TraceContext {
+        fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+            enum Field {
+                Traceparent,
+                Tracestate,
+            }
+
+            impl<'de> Deserialize<'de> for Field {
+                fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+                    struct FieldVisitor;
+                    impl<'de> Visitor<'de> for FieldVisitor {
+                        type Value = Field;
+                        fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                            f.write_str("`traceparent` or `tracestate`")
+                        }
+                        fn visit_str<E: de::Error>(self, s: &str) -> Result<Field, E> {
+                            match s {
+                                "traceparent" => Ok(Field::Traceparent),
+                                "tracestate" => Ok(Field::Tracestate),
+                                _ => Err(E::unknown_field(s, FIELDS)),
+                            }
+                        }
+                    }
+                    d.deserialize_identifier(FieldVisitor)
+                }
+            }
+
+            struct TraceContextVisitor;
+            impl<'de> Visitor<'de> for TraceContextVisitor {
+                type Value = TraceContext;
+                fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                    f.write_str("struct TraceContext")
+                }
+                fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
+                    let mut traceparent = None;
+                    let mut tracestate = None;
+                    while let Some(key) = map.next_key()? {
+                        match key {
+                            Field::Traceparent => {
+                                if traceparent.is_some() {
+                                    return Err(de::Error::duplicate_field("traceparent"));
+                                }
+                                traceparent = Some(map.next_value()?);
+                            }
+                            Field::Tracestate => {
+                                if tracestate.is_some() {
+                                    return Err(de::Error::duplicate_field("tracestate"));
+                                }
+                                tracestate = Some(map.next_value()?);
+                            }
+                        }
+                    }
+                    Ok(TraceContext {
+                        traceparent: traceparent
+                            .ok_or_else(|| de::Error::missing_field("traceparent"))?,
+                        tracestate: tracestate
+                            .ok_or_else(|| de::Error::missing_field("tracestate"))?,
+                    })
+                }
+            }
+
+            const FIELDS: &[&str] = &["traceparent", "tracestate"];
+            d.deserialize_struct("TraceContext", FIELDS, TraceContextVisitor)
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::super::*;
+
+        const VALID_TP: &str = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01";
+
+        #[test]
+        fn trace_context_roundtrip_json() {
+            let ctx = TraceContext {
+                traceparent: VALID_TP.parse().unwrap(),
+                tracestate: "vendor=value".parse().unwrap(),
+            };
+            let json = serde_json::to_string(&ctx).unwrap();
+            assert!(json.contains(VALID_TP));
+            assert!(json.contains("vendor=value"));
+            let back: TraceContext = serde_json::from_str(&json).unwrap();
+            assert_eq!(back, ctx);
+        }
+
+        #[test]
+        fn trace_context_empty_tracestate_roundtrip() {
+            let ctx = TraceContext {
+                traceparent: VALID_TP.parse().unwrap(),
+                tracestate: TraceState::default(),
+            };
+            let json = serde_json::to_string(&ctx).unwrap();
+            let back: TraceContext = serde_json::from_str(&json).unwrap();
+            assert_eq!(back, ctx);
+            assert!(back.tracestate.is_empty());
+        }
+
+        #[test]
+        fn trace_context_json_shape() {
+            let ctx = TraceContext {
+                traceparent: VALID_TP.parse().unwrap(),
+                tracestate: TraceState::default(),
+            };
+            let v: serde_json::Value = serde_json::to_value(&ctx).unwrap();
+            assert_eq!(v["traceparent"], serde_json::Value::String(VALID_TP.into()));
+            assert_eq!(v["tracestate"], serde_json::Value::String(String::new()));
+        }
+    }
 }
 
 #[cfg(test)]
@@ -392,49 +525,6 @@ mod tests {
         let mut headers = HeaderMap::new();
         inject_server_timing(&tp, &mut headers);
         assert_eq!(extract_server_timing(&headers).unwrap(), tp);
-    }
-
-    #[cfg(feature = "serde")]
-    mod serde_tests {
-        use super::*;
-
-        const VALID_TP: &str = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01";
-
-        #[test]
-        fn trace_context_roundtrip_json() {
-            let ctx = TraceContext {
-                traceparent: VALID_TP.parse().unwrap(),
-                tracestate: "vendor=value".parse().unwrap(),
-            };
-            let json = serde_json::to_string(&ctx).unwrap();
-            assert!(json.contains(VALID_TP));
-            assert!(json.contains("vendor=value"));
-            let back: TraceContext = serde_json::from_str(&json).unwrap();
-            assert_eq!(back, ctx);
-        }
-
-        #[test]
-        fn trace_context_empty_tracestate_roundtrip() {
-            let ctx = TraceContext {
-                traceparent: VALID_TP.parse().unwrap(),
-                tracestate: TraceState::default(),
-            };
-            let json = serde_json::to_string(&ctx).unwrap();
-            let back: TraceContext = serde_json::from_str(&json).unwrap();
-            assert_eq!(back, ctx);
-            assert!(back.tracestate.is_empty());
-        }
-
-        #[test]
-        fn trace_context_json_shape() {
-            let ctx = TraceContext {
-                traceparent: VALID_TP.parse().unwrap(),
-                tracestate: TraceState::default(),
-            };
-            let v: serde_json::Value = serde_json::to_value(&ctx).unwrap();
-            assert_eq!(v["traceparent"], serde_json::Value::String(VALID_TP.into()));
-            assert_eq!(v["tracestate"], serde_json::Value::String(String::new()));
-        }
     }
 
     #[test]

@@ -267,15 +267,15 @@ fn is_nblk_chr(b: u8) -> bool {
 }
 
 #[cfg(feature = "serde")]
-mod serde_impl {
+mod serde {
     use std::fmt;
 
-    use serde::Deserialize;
-    use serde::Deserializer;
-    use serde::Serialize;
-    use serde::Serializer;
-    use serde::de;
-    use serde::de::Visitor;
+    use serde_core::Deserialize;
+    use serde_core::Deserializer;
+    use serde_core::Serialize;
+    use serde_core::Serializer;
+    use serde_core::de;
+    use serde_core::de::Visitor;
 
     use super::TraceState;
 

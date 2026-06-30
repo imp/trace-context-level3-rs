@@ -674,7 +674,7 @@ mod tests {
 
         let tp = TraceParent::restart(
             TraceId::from_bytes([0xAB; 16]).unwrap(),
-            trace_context_level3::ParentId::from_bytes([0xCD; 8]).unwrap(),
+            ParentId::from_bytes([0xCD; 8]).unwrap(),
             TraceFlags::default(),
         );
         let ctx = TraceContext {

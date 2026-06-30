@@ -333,7 +333,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9a8e94ea7f378bd32cbbd37198a4a91436180c5bb472411e48b5ec2e2124ae9e"
 dependencies = [
  "serde_core",
- "serde_derive",
 ]
 
 [[package]]
@@ -485,7 +484,7 @@ name = "trace-context-level3"
 version = "0.0.0"
 dependencies = [
  "rand",
- "serde",
+ "serde_core",
  "serde_json",
  "thiserror",
 ]
@@ -509,7 +508,7 @@ name = "trace-context-level3-http"
 version = "0.0.0"
 dependencies = [
  "http",
- "serde",
+ "serde_core",
  "serde_json",
  "trace-context-level3",
 ]

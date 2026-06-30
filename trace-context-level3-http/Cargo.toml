@@ -11,12 +11,12 @@ readme.workspace = true
 
 
 [features]
-serde = ["dep:serde", "trace-context-level3/serde"]
+serde = ["dep:serde_core", "trace-context-level3/serde"]
 
 
 [dependencies]
 http.workspace = true
-serde = { workspace = true, optional = true, features = ["derive"] }
+serde_core = { workspace = true, optional = true }
 trace-context-level3.workspace = true
 
 

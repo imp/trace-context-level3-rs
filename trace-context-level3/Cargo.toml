@@ -12,12 +12,12 @@ readme.workspace = true
 
 [features]
 rand = ["dep:rand"]
-serde = ["dep:serde"]
+serde = ["dep:serde_core"]
 
 
 [dependencies]
 rand = { workspace = true, optional = true }
-serde = { workspace = true, optional = true }
+serde_core = { workspace = true, optional = true }
 thiserror.workspace = true
 
 
